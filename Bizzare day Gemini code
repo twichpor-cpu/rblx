@@ -1,6 +1,6 @@
 --[[ 
-    STRICT ITEM TRACKER & BANKNOTE TP
-    Filter: Only Tools and exact "Banknote" matches.
+    STRICT ITEM TRACKER & BANKNOTE TP (V3)
+    Filter: Only World-Dropped Tools (Ignores Player-held items)
 ]]
 
 local Players = game:GetService("Players")
@@ -13,14 +13,21 @@ local BoxSize = Vector3.new(867, 89, 783)
 local BoxPos = Vector3.new(5662.36, 720.27, -1317.86)
 local CollectNotes = false
 
--- Helper: Get Position (Strictly for Parts or Tools)
+-- Helper: Check if an object belongs to a player
+local function isHeldByPlayer(obj)
+    for _, p in pairs(Players:GetPlayers()) do
+        if p.Character and obj:IsDescendantOf(p.Character) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Helper: Get Position
 local function getPos(obj)
     if obj:IsA("BasePart") then return obj.Position end
-    if obj:IsA("Tool") then
-        local h = obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart")
-        return h and h.Position
-    end
-    return nil
+    local h = obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart")
+    return h and h.Position
 end
 
 -- Teleport Method
@@ -37,13 +44,13 @@ local ScreenGui = Instance.new("ScreenGui", Player:WaitForChild("PlayerGui"))
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 220, 0, 350)
 MainFrame.Position = UDim2.new(0.1, 0, 0.3, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 MainFrame.BorderSizePixel = 0
 
 local TitleBar = Instance.new("TextLabel", MainFrame)
 TitleBar.Size = UDim2.new(1, 0, 0, 30)
-TitleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-TitleBar.Text = "STRICT TRACKER"
+TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+TitleBar.Text = "WORLD ITEM TRACKER"
 TitleBar.TextColor3 = Color3.new(1, 1, 1)
 TitleBar.Font = Enum.Font.SourceSansBold
 
@@ -58,7 +65,7 @@ local ListContainer = Instance.new("ScrollingFrame", MainFrame)
 ListContainer.Size = UDim2.new(1, 0, 1, -85)
 ListContainer.Position = UDim2.new(0, 0, 0, 85)
 ListContainer.BackgroundTransparency = 1
-Instance.new("UIListLayout", ListContainer)
+local UIList = Instance.new("UIListLayout", ListContainer)
 
 -- Drag Logic
 local dragging, dragStart, startPos
@@ -97,27 +104,33 @@ task.spawn(function()
             if v:IsA("TextButton") then v:Destroy() end
         end
 
-        -- Search specifically for Tools and Banknotes
+        -- Search
         for _, obj in pairs(workspace:GetDescendants()) do
             
-            -- 1. STRICT BANKNOTE TP
-            if CollectNotes and obj.Name == "Banknote" then
-                local p = getPos(obj)
-                if p then teleport(p) end
-            end
+            -- Ignore anything held by a player (Crucial Fix)
+            if not isHeldByPlayer(obj) then
+                
+                -- 1. BANKNOTE TP
+                if CollectNotes and obj.Name == "Banknote" then
+                    local p = getPos(obj)
+                    if p then teleport(p) end
+                end
 
-            -- 2. STRICT TOOL LISTER
-            -- Only proceed if the object is a Tool or the Handle of a Tool
-            local isActualTool = obj:IsA("Tool")
-            if isActualTool then
-                local p = getPos(obj)
-                if p then
-                    -- Check if inside your coordinates
-                    local min = BoxPos - (BoxSize / 2)
-                    local max = BoxPos + (BoxSize / 2)
-                    if (p.X >= min.X and p.X <= max.X) and (p.Y >= min.Y and p.Y <= max.Y) and (p.Z >= min.Z and p.Z <= max.Z) then
-                        counts[obj.Name] = (counts[obj.Name] or 0) + 1
-                        if not firstPos[obj.Name] then firstPos[obj.Name] = p end
+                -- 2. DROPPED TOOL LISTER
+                if obj:IsA("Tool") then
+                    local p = getPos(obj)
+                    if p then
+                        local min = BoxPos - (BoxSize / 2)
+                        local max = BoxPos + (BoxSize / 2)
+                        
+                        -- Check if in Box OR inside the ItemSpawnAreas folder
+                        local inBox = (p.X >= min.X and p.X <= max.X) and (p.Y >= min.Y and p.Y <= max.Y) and (p.Z >= min.Z and p.Z <= max.Z)
+                        local inSpawnArea = obj:IsDescendantOf(workspace:FindFirstChild("ItemSpawnAreas") or workspace)
+
+                        if inBox or inSpawnArea then
+                            counts[obj.Name] = (counts[obj.Name] or 0) + 1
+                            if not firstPos[obj.Name] then firstPos[obj.Name] = p end
+                        end
                     end
                 end
             end
@@ -127,7 +140,7 @@ task.spawn(function()
         for name, count in pairs(counts) do
             local b = Instance.new("TextButton", ListContainer)
             b.Size = UDim2.new(1, 0, 0, 25)
-            b.Text = " " .. name .. " x" .. count
+            b.Text = "  " .. name .. " x" .. count
             b.TextColor3 = Color3.new(1, 1, 1)
             b.TextXAlignment = Enum.TextXAlignment.Left
             b.BackgroundTransparency = 0.9
