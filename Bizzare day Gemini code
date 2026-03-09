@@ -1,6 +1,6 @@
 --[[ 
-    STRICT ITEM TRACKER & BANKNOTE TP (V3)
-    Filter: Only World-Dropped Tools (Ignores Player-held items)
+    ULTRA-OPTIMIZED ITEM TRACKER (V5)
+    Features: Persistent UI, Server Timer, Distance Tracking, No-Lag Scan
 ]]
 
 local Players = game:GetService("Players")
@@ -11,26 +11,16 @@ local Player = Players.LocalPlayer
 -- Configuration
 local BoxSize = Vector3.new(867, 89, 783)
 local BoxPos = Vector3.new(5662.36, 720.27, -1317.86)
+local SpawnAreas = workspace:FindFirstChild("ItemSpawnAreas")
 local CollectNotes = false
 
--- Helper: Check if an object belongs to a player
-local function isHeldByPlayer(obj)
-    for _, p in pairs(Players:GetPlayers()) do
-        if p.Character and obj:IsDescendantOf(p.Character) then
-            return true
-        end
-    end
-    return false
-end
-
--- Helper: Get Position
+-- Helper: Get Position Safely
 local function getPos(obj)
-    if obj:IsA("BasePart") then return obj.Position end
-    local h = obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart")
-    return h and h.Position
+    local p = obj:IsA("BasePart") and obj or obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart")
+    return p and p.Position
 end
 
--- Teleport Method
+-- IY-Style Teleport
 local function teleport(pos)
     local char = Player.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -41,18 +31,21 @@ end
 
 -- GUI Setup
 local ScreenGui = Instance.new("ScreenGui", Player:WaitForChild("PlayerGui"))
+ScreenGui.Name = "PersistentTracker"
+ScreenGui.ResetOnSpawn = false -- THIS KEEPS IT ON SCREEN AFTER DEATH
+
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 220, 0, 350)
+MainFrame.Size = UDim2.new(0, 240, 0, 380)
 MainFrame.Position = UDim2.new(0.1, 0, 0.3, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.BorderSizePixel = 0
 
 local TitleBar = Instance.new("TextLabel", MainFrame)
 TitleBar.Size = UDim2.new(1, 0, 0, 30)
-TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-TitleBar.Text = "WORLD ITEM TRACKER"
+TitleBar.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+TitleBar.Text = "SERVER TIME: 0000.0"
 TitleBar.TextColor3 = Color3.new(1, 1, 1)
-TitleBar.Font = Enum.Font.SourceSansBold
+TitleBar.Font = Enum.Font.Code
 
 local NoteBtn = Instance.new("TextButton", MainFrame)
 NoteBtn.Size = UDim2.new(0.9, 0, 0, 35)
@@ -62,18 +55,16 @@ NoteBtn.Text = "Collect Banknotes: OFF"
 NoteBtn.TextColor3 = Color3.new(1, 1, 1)
 
 local ListContainer = Instance.new("ScrollingFrame", MainFrame)
-ListContainer.Size = UDim2.new(1, 0, 1, -85)
-ListContainer.Position = UDim2.new(0, 0, 0, 85)
+ListContainer.Size = UDim2.new(1, 0, 1, -110)
+ListContainer.Position = UDim2.new(0, 0, 0, 110)
 ListContainer.BackgroundTransparency = 1
-local UIList = Instance.new("UIListLayout", ListContainer)
+Instance.new("UIListLayout", ListContainer)
 
 -- Drag Logic
 local dragging, dragStart, startPos
 TitleBar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-        dragStart = input.Position
-        startPos = MainFrame.Position
+        dragging = true; dragStart = input.Position; startPos = MainFrame.Position
     end
 end)
 UserInputService.InputChanged:Connect(function(input)
@@ -86,65 +77,71 @@ UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
 end)
 
--- Toggle
 NoteBtn.MouseButton1Click:Connect(function()
     CollectNotes = not CollectNotes
     NoteBtn.Text = "Collect Banknotes: " .. (CollectNotes and "ON" or "OFF")
     NoteBtn.BackgroundColor3 = CollectNotes and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(150, 50, 50)
 end)
 
--- Main Loop
+-- Main Optimized Loop
 task.spawn(function()
-    while task.wait(1) do
+    while task.wait(0.5) do
+        -- Update Server Time Display
+        TitleBar.Text = string.format("SERVER TIME: %.1f", time())
+        
         local counts = {}
         local firstPos = {}
+        local char = Player.Character
+        local myPos = (char and char:FindFirstChild("HumanoidRootPart")) and char.HumanoidRootPart.Position or Vector3.new(0,0,0)
 
-        -- Cleanup UI
-        for _, v in pairs(ListContainer:GetChildren()) do
-            if v:IsA("TextButton") then v:Destroy() end
-        end
-
-        -- Search
-        for _, obj in pairs(workspace:GetDescendants()) do
-            
-            -- Ignore anything held by a player (Crucial Fix)
-            if not isHeldByPlayer(obj) then
+        -- Efficient Folder Scanning
+        local function scanFolder(folder)
+            if not folder then return end
+            for _, obj in pairs(folder:GetChildren()) do
+                -- Filter out players
+                if obj:IsA("Model") and Players:GetPlayerFromCharacter(obj) then continue end
                 
-                -- 1. BANKNOTE TP
+                -- Banknote Check
                 if CollectNotes and obj.Name == "Banknote" then
                     local p = getPos(obj)
                     if p then teleport(p) end
                 end
 
-                -- 2. DROPPED TOOL LISTER
+                -- Tool Logic
                 if obj:IsA("Tool") then
                     local p = getPos(obj)
                     if p then
+                        local dist = math.floor((myPos - p).Magnitude)
                         local min = BoxPos - (BoxSize / 2)
                         local max = BoxPos + (BoxSize / 2)
                         
-                        -- Check if in Box OR inside the ItemSpawnAreas folder
-                        local inBox = (p.X >= min.X and p.X <= max.X) and (p.Y >= min.Y and p.Y <= max.Y) and (p.Z >= min.Z and p.Z <= max.Z)
-                        local inSpawnArea = obj:IsDescendantOf(workspace:FindFirstChild("ItemSpawnAreas") or workspace)
-
-                        if inBox or inSpawnArea then
+                        -- Check if in Item Box
+                        if (p.X >= min.X and p.X <= max.X) and (p.Y >= min.Y and p.Y <= max.Y) and (p.Z >= min.Z and p.Z <= max.Z) then
                             counts[obj.Name] = (counts[obj.Name] or 0) + 1
-                            if not firstPos[obj.Name] then firstPos[obj.Name] = p end
+                            -- Store the closest one
+                            if not firstPos[obj.Name] or dist < firstPos[obj.Name].dist then
+                                firstPos[obj.Name] = {pos = p, dist = dist}
+                            end
                         end
                     end
                 end
             end
         end
 
-        -- Update UI List
-        for name, count in pairs(counts) do
+        scanFolder(workspace)
+        scanFolder(SpawnAreas)
+
+        -- Refresh UI List
+        for _, v in pairs(ListContainer:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
+
+        for name, data in pairs(firstPos) do
             local b = Instance.new("TextButton", ListContainer)
-            b.Size = UDim2.new(1, 0, 0, 25)
-            b.Text = "  " .. name .. " x" .. count
+            b.Size = UDim2.new(1, -10, 0, 30)
+            b.BackgroundTransparency = 0.8
+            b.Text = string.format(" %s x%d [%dm]", name, counts[name], data.dist)
             b.TextColor3 = Color3.new(1, 1, 1)
             b.TextXAlignment = Enum.TextXAlignment.Left
-            b.BackgroundTransparency = 0.9
-            b.MouseButton1Click:Connect(function() teleport(firstPos[name]) end)
+            b.MouseButton1Click:Connect(function() teleport(data.pos) end)
         end
     end
 end)
