@@ -1,165 +1,160 @@
 --[[ 
-    ADVANCED ITEM TRACKER & AUTO-SELLER (V10)
-    Features: Tabbed GUI, Auto-Sell NPC, Keep-Filter, Persistent UI
+    ADVANCED REMOTE SELLER & TRACKER (V12)
+    Integration: ReplicatedStorage Sell Remote
 ]]
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local Player = Players.LocalPlayer
 
--- Configuration & State
+-- Configuration
 local BoxSize = Vector3.new(867, 89, 783)
 local BoxPos = Vector3.new(5662.36, 720.27, -1317.86)
 local CollectNotes = false
 local AutoSell = false
-local KeepList = {["Arrow"] = false, ["Rokakaka"] = false, ["Mysterious Arrow"] = false} -- Add items here
+local KeepList = {} 
 
--- GUI Setup
-local ScreenGui = Instance.new("ScreenGui", Player:WaitForChild("PlayerGui"))
-ScreenGui.Name = "AdvancedTracker_V10"
-ScreenGui.ResetOnSpawn = false 
+-- Remote Path from SimpleSpy
+local SellRemote = ReplicatedStorage:WaitForChild("BismalqStuff"):WaitForChild("Remotes"):WaitForChild("Sell")
+
+-- Helper: Teleport
+local function teleport(pos)
+    local char = Player.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if root then
+        root.CFrame = CFrame.new(pos) + Vector3.new(0, 2, 0)
+    end
+end
+
+-- GUI Setup (Persistent)
+local ScreenGui = Instance.new("ScreenGui", Player.PlayerGui)
+ScreenGui.Name = "FinalTracker_V12"
+ScreenGui.ResetOnSpawn = false
 
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 220, 0, 350)
 MainFrame.Position = UDim2.new(0.1, 0, 0.3, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
 
 local TitleBar = Instance.new("TextLabel", MainFrame)
 TitleBar.Size = UDim2.new(1, 0, 0, 30)
-TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-TitleBar.Text = "  CONTROL PANEL"
+TitleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+TitleBar.Text = "  CONTROLS V12"
 TitleBar.TextColor3 = Color3.new(1, 1, 1)
 TitleBar.Font = Enum.Font.Code
 TitleBar.TextXAlignment = Enum.TextXAlignment.Left
 
--- [[ TABS / FILTER PANEL ]]
+local CloseBtn = Instance.new("TextButton", TitleBar)
+CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseBtn.Position = UDim2.new(1, -30, 0, 0)
+CloseBtn.Text = "X"; CloseBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+CloseBtn.BorderSizePixel = 0
+CloseBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
+
+-- [[ FILTER TAB ]]
 local FilterFrame = Instance.new("Frame", MainFrame)
 FilterFrame.Size = UDim2.new(0, 180, 1, 0)
-FilterFrame.Position = UDim2.new(1, 5, 0, 0) -- Slid to the right
+FilterFrame.Position = UDim2.new(1, 5, 0, 0)
 FilterFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 FilterFrame.Visible = false
 
 local FilterList = Instance.new("ScrollingFrame", FilterFrame)
-FilterList.Size = UDim2.new(1, 0, 1, -30)
-FilterList.Position = UDim2.new(0, 0, 0, 30)
-FilterList.BackgroundTransparency = 1
+FilterList.Size = UDim2.new(1, 0, 1, -10); FilterList.BackgroundTransparency = 1
 Instance.new("UIListLayout", FilterList)
 
-local FilterTitle = Instance.new("TextLabel", FilterFrame)
-FilterTitle.Size = UDim2.new(1, 0, 0, 30)
-FilterTitle.Text = "KEEP FILTER"
-FilterTitle.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-FilterTitle.TextColor3 = Color3.new(1, 1, 1)
-
--- [[ MAIN BUTTONS ]]
-local function createBtn(text, pos, color)
-    local b = Instance.new("TextButton", MainFrame)
-    b.Size = UDim2.new(0.9, 0, 0, 30)
-    b.Position = pos
-    b.BackgroundColor3 = color
-    b.Text = text
+local tItems = {"Arrow", "Rokakaka", "Mysterious Arrow", "Pure Rokakaka", "Ribcage", "Dio's Bone", "Ancient Arrow", "Requiem Arrow"}
+for _, name in pairs(tItems) do
+    local b = Instance.new("TextButton", FilterList)
+    b.Size = UDim2.new(1, 0, 0, 25); b.Text = name .. ": SELL"; b.BackgroundColor3 = Color3.fromRGB(70, 20, 20)
     b.TextColor3 = Color3.new(1, 1, 1)
+    b.Font = Enum.Font.SourceSans
+    b.MouseButton1Click:Connect(function()
+        KeepList[name] = not KeepList[name]
+        b.Text = name .. (KeepList[name] and ": KEEP" or ": SELL")
+        b.BackgroundColor3 = KeepList[name] and Color3.fromRGB(20, 70, 20) or Color3.fromRGB(70, 20, 20)
+    end)
+end
+
+-- [[ BUTTONS ]]
+local function createBtn(txt, y, color)
+    local b = Instance.new("TextButton", MainFrame)
+    b.Size = UDim2.new(0.9, 0, 0, 30); b.Position = UDim2.new(0.05, 0, 0, y)
+    b.BackgroundColor3 = color; b.Text = txt; b.TextColor3 = Color3.new(1,1,1)
+    b.Font = Enum.Font.SourceSans
     return b
 end
 
-local NoteBtn = createBtn("Notes: OFF", UDim2.new(0.05, 0, 0.12, 0), Color3.fromRGB(120, 40, 40))
-local SellBtn = createBtn("Auto-Sell: OFF", UDim2.new(0.05, 0, 0.22, 0), Color3.fromRGB(120, 40, 40))
-local TabBtn = createBtn("Open Filter >", UDim2.new(0.05, 0, 0.32, 0), Color3.fromRGB(60, 60, 60))
+local NoteBtn = createBtn("Banknotes: OFF", 40, Color3.fromRGB(80, 30, 30))
+local SellBtn = createBtn("Auto-Sell (REMOTE): OFF", 75, Color3.fromRGB(80, 30, 30))
+local TabBtn = createBtn("Open Filter >", 110, Color3.fromRGB(50, 50, 50))
 
-local ListContainer = Instance.new("ScrollingFrame", MainFrame)
-ListContainer.Size = UDim2.new(1, 0, 0.55, 0)
-ListContainer.Position = UDim2.new(0, 0, 0.45, 0)
-ListContainer.BackgroundTransparency = 1
-Instance.new("UIListLayout", ListContainer)
+local Disp = Instance.new("ScrollingFrame", MainFrame)
+Disp.Size = UDim2.new(1, 0, 1, -150); Disp.Position = UDim2.new(0, 0, 0, 150)
+Disp.BackgroundTransparency = 1; Instance.new("UIListLayout", Disp)
 
--- [[ LOGIC ]]
+-- Button Click Handlers
+NoteBtn.MouseButton1Click:Connect(function()
+    CollectNotes = not CollectNotes
+    NoteBtn.Text = "Banknotes: " .. (CollectNotes and "ON" or "OFF")
+    NoteBtn.BackgroundColor3 = CollectNotes and Color3.fromRGB(30, 80, 30) or Color3.fromRGB(80, 30, 30)
+end)
 
--- Filter Toggle Logic
+SellBtn.MouseButton1Click:Connect(function()
+    AutoSell = not AutoSell
+    SellBtn.Text = "Auto-Sell (REMOTE): " .. (AutoSell and "ON" or "OFF")
+    SellBtn.BackgroundColor3 = AutoSell and Color3.fromRGB(30, 80, 30) or Color3.fromRGB(80, 30, 30)
+end)
+
 TabBtn.MouseButton1Click:Connect(function()
     FilterFrame.Visible = not FilterFrame.Visible
     TabBtn.Text = FilterFrame.Visible and "< Close Filter" or "Open Filter >"
 end)
 
--- Auto-Sell Logic
-SellBtn.MouseButton1Click:Connect(function()
-    AutoSell = not AutoSell
-    SellBtn.Text = "Auto-Sell: " .. (AutoSell and "ON" or "OFF")
-    SellBtn.BackgroundColor3 = AutoSell and Color3.fromRGB(40, 120, 40) or Color3.fromRGB(120, 40, 40)
-end)
-
--- Note Toggle
-NoteBtn.MouseButton1Click:Connect(function()
-    CollectNotes = not CollectNotes
-    NoteBtn.Text = "Notes: " .. (CollectNotes and "ON" or "OFF")
-    NoteBtn.BackgroundColor3 = CollectNotes and Color3.fromRGB(40, 120, 40) or Color3.fromRGB(120, 40, 40)
-end)
-
--- Populate Filter List (From your Trello Items)
-local itemsToFilter = {"Arrow", "Rokakaka", "Mysterious Arrow", "Pure Rokakaka", "Ribcage", "Dio's Bone"}
-for _, itemName in pairs(itemsToFilter) do
-    local b = Instance.new("TextButton", FilterList)
-    b.Size = UDim2.new(1, 0, 0, 25)
-    b.Text = itemName .. ": SELL"
-    b.BackgroundColor3 = Color3.fromRGB(100, 30, 30)
-    b.TextColor3 = Color3.new(1, 1, 1)
-    
-    b.MouseButton1Click:Connect(function()
-        KeepList[itemName] = not KeepList[itemName]
-        b.Text = itemName .. (KeepList[itemName] and ": KEEP" or ": SELL")
-        b.BackgroundColor3 = KeepList[itemName] and Color3.fromRGB(30, 100, 30) or Color3.fromRGB(100, 30, 30)
-    end)
-end
-
--- Teleport Helper
-local function teleport(pos)
-    local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-    if root then root.CFrame = CFrame.new(pos) + Vector3.new(0,3,0) end
-end
-
--- Main Loop
+-- MAIN LOOP
 task.spawn(function()
-    while task.wait(0.7) do
+    while task.wait(0.5) do
         local char = Player.Character
         if not char then continue end
-        
-        -- 1. Auto-Sell Logic
+
+        -- 1. REMOTE SELL LOGIC
         if AutoSell then
             local tool = char:FindFirstChildOfClass("Tool")
             if tool and not KeepList[tool.Name] then
-                local merchant = workspace:FindFirstChild("NPCs") and workspace.NPCs:FindFirstChild("Merchant")
-                if merchant then
-                    teleport(merchant:GetModelCFrame().Position)
-                    -- Fire ProximityPrompt if it exists
-                    local prompt = merchant:FindFirstChildWhichIsA("ProximityPrompt", true)
-                    if prompt then fireproximityprompt(prompt) end
-                end
+                -- Fires the remote discovered by SimpleSpy
+                SellRemote:FireServer()
             end
         end
 
-        -- 2. Note Logic & Item Listing
+        -- 2. LISTER & NOTES
         local counts = {}
         local firstPos = {}
         for _, obj in pairs(workspace:GetChildren()) do
-            if obj.Name == "Banknote" and CollectNotes then teleport(obj.Position) end
+            if CollectNotes and obj.Name == "Banknote" then teleport(obj.Position) end
             
-            if obj:IsA("Tool") then
-                local p = obj:FindFirstChild("Handle") and obj.Handle.Position
+            if obj:IsA("Tool") and not Players:GetPlayerFromCharacter(obj.Parent) then
+                local p = (obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart"))
                 if p then
+                    local pos = p.Position
                     local min = BoxPos - (BoxSize/2); local max = BoxPos + (BoxSize/2)
-                    if (p.X >= min.X and p.X <= max.X) and (p.Y >= min.Y and p.Y <= max.Y) and (p.Z >= min.Z and p.Z <= max.Z) then
+                    if (pos.X >= min.X and pos.X <= max.X) and (pos.Y >= min.Y and pos.Y <= max.Y) and (pos.Z >= min.Z and pos.Z <= max.Z) then
                         counts[obj.Name] = (counts[obj.Name] or 0) + 1
-                        firstPos[obj.Name] = p
+                        firstPos[obj.Name] = pos
                     end
                 end
             end
         end
 
-        -- Update UI
-        for _, v in pairs(ListContainer:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
+        -- UI Refresh
+        for _, v in pairs(Disp:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
         for name, p in pairs(firstPos) do
-            local b = Instance.new("TextButton", ListContainer)
-            b.Size = UDim2.new(1, 0, 0, 20); b.Text = name .. " x" .. counts[name]; b.TextColor3 = Color3.new(1,1,1); b.BackgroundTransparency = 0.9
+            local b = Instance.new("TextButton", Disp)
+            b.Size = UDim2.new(1, 0, 0, 20); b.Text = "  " .. name .. " x" .. counts[name]
+            b.TextColor3 = Color3.new(1,1,1); b.BackgroundTransparency = 0.9
+            b.TextXAlignment = Enum.TextXAlignment.Left
             b.MouseButton1Click:Connect(function() teleport(p) end)
         end
     end
