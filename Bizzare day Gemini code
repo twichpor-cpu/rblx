@@ -1,6 +1,6 @@
 --[[ 
-    DRAGGABLE ITEM TRACKER & BANKNOTE TP
-    Instructions: Drag the "ITEM TRACKER" title bar to move the UI.
+    STRICT ITEM TRACKER & BANKNOTE TP
+    Filter: Only Tools and exact "Banknote" matches.
 ]]
 
 local Players = game:GetService("Players")
@@ -13,11 +13,14 @@ local BoxSize = Vector3.new(867, 89, 783)
 local BoxPos = Vector3.new(5662.36, 720.27, -1317.86)
 local CollectNotes = false
 
--- Helper: Get Position
+-- Helper: Get Position (Strictly for Parts or Tools)
 local function getPos(obj)
     if obj:IsA("BasePart") then return obj.Position end
-    local p = obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart") or (obj:IsA("Model") and obj.PrimaryPart)
-    return p and p.Position or nil
+    if obj:IsA("Tool") then
+        local h = obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart")
+        return h and h.Position
+    end
+    return nil
 end
 
 -- Teleport Method
@@ -31,18 +34,16 @@ end
 
 -- GUI Setup
 local ScreenGui = Instance.new("ScreenGui", Player:WaitForChild("PlayerGui"))
-ScreenGui.Name = "DraggableTracker"
-
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 220, 0, 350)
 MainFrame.Position = UDim2.new(0.1, 0, 0.3, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.BorderSizePixel = 0
 
 local TitleBar = Instance.new("TextLabel", MainFrame)
 TitleBar.Size = UDim2.new(1, 0, 0, 30)
-TitleBar.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-TitleBar.Text = "ITEM TRACKER (DRAG ME)"
+TitleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+TitleBar.Text = "STRICT TRACKER"
 TitleBar.TextColor3 = Color3.new(1, 1, 1)
 TitleBar.Font = Enum.Font.SourceSansBold
 
@@ -50,81 +51,86 @@ local NoteBtn = Instance.new("TextButton", MainFrame)
 NoteBtn.Size = UDim2.new(0.9, 0, 0, 35)
 NoteBtn.Position = UDim2.new(0.05, 0, 0.1, 0)
 NoteBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
-NoteBtn.Text = "Collect Notes: OFF"
+NoteBtn.Text = "Collect Banknotes: OFF"
 NoteBtn.TextColor3 = Color3.new(1, 1, 1)
 
 local ListContainer = Instance.new("ScrollingFrame", MainFrame)
-ListContainer.Size = UDim2.new(1, 0, 1, -80)
-ListContainer.Position = UDim2.new(0, 0, 0, 80)
+ListContainer.Size = UDim2.new(1, 0, 1, -85)
+ListContainer.Position = UDim2.new(0, 0, 0, 85)
 ListContainer.BackgroundTransparency = 1
 Instance.new("UIListLayout", ListContainer)
 
--- [[ DRAG LOGIC ]] --
-local dragging, dragInput, dragStart, startPos
-
+-- Drag Logic
+local dragging, dragStart, startPos
 TitleBar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         dragging = true
         dragStart = input.Position
         startPos = MainFrame.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then dragging = false end
-        end)
     end
 end)
-
 UserInputService.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement and dragging then
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
         local delta = input.Position - dragStart
         MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
     end
 end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+end)
 
--- Toggle Collector
+-- Toggle
 NoteBtn.MouseButton1Click:Connect(function()
     CollectNotes = not CollectNotes
-    NoteBtn.Text = CollectNotes and "Collect Notes: ON" or "Collect Notes: OFF"
+    NoteBtn.Text = "Collect Banknotes: " .. (CollectNotes and "ON" or "OFF")
     NoteBtn.BackgroundColor3 = CollectNotes and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(150, 50, 50)
 end)
 
--- Main Dynamic Loop
+-- Main Loop
 task.spawn(function()
-    while task.wait(0.8) do
+    while task.wait(1) do
         local counts = {}
         local firstPos = {}
 
+        -- Cleanup UI
         for _, v in pairs(ListContainer:GetChildren()) do
             if v:IsA("TextButton") then v:Destroy() end
         end
 
-        for _, item in pairs(workspace:GetDescendants()) do
-            -- Banknote Check
-            if CollectNotes and (item.Name == "Banknote" or item.Name == "Bank Note") then
-                local p = getPos(item)
+        -- Search specifically for Tools and Banknotes
+        for _, obj in pairs(workspace:GetDescendants()) do
+            
+            -- 1. STRICT BANKNOTE TP
+            if CollectNotes and obj.Name == "Banknote" then
+                local p = getPos(obj)
                 if p then teleport(p) end
             end
 
-            -- Box Detection
-            local p = getPos(item)
-            if p then
-                local min = BoxPos - (BoxSize / 2)
-                local max = BoxPos + (BoxSize / 2)
-                if (p.X >= min.X and p.X <= max.X) and (p.Y >= min.Y and p.Y <= max.Y) and (p.Z >= min.Z and p.Z <= max.Z) then
-                    local name = item.Name
-                    if item:IsA("Handle") then name = item.Parent.Name end
-                    
-                    counts[name] = (counts[name] or 0) + 1
-                    if not firstPos[name] then firstPos[name] = p end
+            -- 2. STRICT TOOL LISTER
+            -- Only proceed if the object is a Tool or the Handle of a Tool
+            local isActualTool = obj:IsA("Tool")
+            if isActualTool then
+                local p = getPos(obj)
+                if p then
+                    -- Check if inside your coordinates
+                    local min = BoxPos - (BoxSize / 2)
+                    local max = BoxPos + (BoxSize / 2)
+                    if (p.X >= min.X and p.X <= max.X) and (p.Y >= min.Y and p.Y <= max.Y) and (p.Z >= min.Z and p.Z <= max.Z) then
+                        counts[obj.Name] = (counts[obj.Name] or 0) + 1
+                        if not firstPos[obj.Name] then firstPos[obj.Name] = p end
+                    end
                 end
             end
         end
 
+        -- Update UI List
         for name, count in pairs(counts) do
             local b = Instance.new("TextButton", ListContainer)
             b.Size = UDim2.new(1, 0, 0, 25)
-            b.BackgroundTransparency = 0.9
-            b.Text = name .. " x" .. count
+            b.Text = " " .. name .. " x" .. count
             b.TextColor3 = Color3.new(1, 1, 1)
+            b.TextXAlignment = Enum.TextXAlignment.Left
+            b.BackgroundTransparency = 0.9
             b.MouseButton1Click:Connect(function() teleport(firstPos[name]) end)
         end
     end
