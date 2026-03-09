@@ -1,6 +1,6 @@
 --[[ 
-    ADVANCED REMOTE SELLER & TRACKER (V14)
-    Fixes: Stationary Auto-Sell (No TP), Guaranteed Close Button visibility
+    ADVANCED REMOTE SELLER & TRACKER (V15)
+    Fixes: Note Collection Scan, Dynamic List Detection, UI Z-Indexing
 ]]
 
 local Players = game:GetService("Players")
@@ -18,7 +18,7 @@ local KeepList = {}
 -- Remote Path
 local SellRemote = ReplicatedStorage:WaitForChild("BismalqStuff"):WaitForChild("Remotes"):WaitForChild("Sell")
 
--- Helper: Teleport
+-- Helper: Teleport Safely
 local function teleport(pos)
     local char = Player.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -29,9 +29,9 @@ end
 
 -- GUI Setup
 local ScreenGui = Instance.new("ScreenGui", Player.PlayerGui)
-ScreenGui.Name = "FinalTracker_V14"
+ScreenGui.Name = "FinalTracker_V15"
 ScreenGui.ResetOnSpawn = false
-ScreenGui.DisplayOrder = 10 -- Ensures it's above other game UIs
+ScreenGui.DisplayOrder = 999 
 
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 220, 0, 350)
@@ -41,7 +41,6 @@ MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Draggable = true
 
--- Separate Title Bar for Dragging
 local TitleBar = Instance.new("Frame", MainFrame)
 TitleBar.Size = UDim2.new(1, 0, 0, 30)
 TitleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
@@ -51,38 +50,31 @@ local TitleText = Instance.new("TextLabel", TitleBar)
 TitleText.Size = UDim2.new(1, -35, 1, 0)
 TitleText.Position = UDim2.new(0, 5, 0, 0)
 TitleText.BackgroundTransparency = 1
-TitleText.Text = "TRACKER V14"
+TitleText.Text = "TRACKER V15"
 TitleText.TextColor3 = Color3.new(1, 1, 1)
 TitleText.Font = Enum.Font.Code
 TitleText.TextXAlignment = Enum.TextXAlignment.Left
 
--- [[ GUARANTEED CLOSE BUTTON ]]
+-- CLOSE BUTTON (Highest ZIndex)
 local CloseBtn = Instance.new("TextButton", MainFrame)
-CloseBtn.Name = "CloseButton"
 CloseBtn.Size = UDim2.new(0, 30, 0, 30)
 CloseBtn.Position = UDim2.new(1, -30, 0, 0)
 CloseBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
 CloseBtn.Text = "X"
 CloseBtn.TextColor3 = Color3.new(1, 1, 1)
 CloseBtn.Font = Enum.Font.SourceSansBold
-CloseBtn.BorderSizePixel = 0
-CloseBtn.ZIndex = 100 -- Force to front
+CloseBtn.ZIndex = 1000 
+CloseBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
 
-CloseBtn.MouseButton1Click:Connect(function() 
-    ScreenGui:Destroy() 
-end)
-
--- [[ FILTER TAB ]]
+-- FILTER TAB
 local FilterFrame = Instance.new("Frame", MainFrame)
 FilterFrame.Size = UDim2.new(0, 180, 1, 0)
 FilterFrame.Position = UDim2.new(1, 5, 0, 0)
 FilterFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-FilterFrame.BorderSizePixel = 0
 FilterFrame.Visible = false
 
 local FilterList = Instance.new("ScrollingFrame", FilterFrame)
 FilterList.Size = UDim2.new(1, 0, 1, -10); FilterList.BackgroundTransparency = 1
-FilterList.ScrollBarThickness = 2
 Instance.new("UIListLayout", FilterList)
 
 local tItems = {"Arrow", "Rokakaka", "Mysterious Arrow", "Pure Rokakaka", "Ribcage", "Dio's Bone", "Ancient Arrow", "Requiem Arrow"}
@@ -97,12 +89,11 @@ for _, name in pairs(tItems) do
     end)
 end
 
--- [[ MAIN UI BUTTONS ]]
+-- BUTTONS
 local function createBtn(txt, y, color)
     local b = Instance.new("TextButton", MainFrame)
     b.Size = UDim2.new(0.9, 0, 0, 35); b.Position = UDim2.new(0.05, 0, 0, y)
     b.BackgroundColor3 = color; b.Text = txt; b.TextColor3 = Color3.new(1,1,1)
-    b.Font = Enum.Font.SourceSans
     return b
 end
 
@@ -114,7 +105,6 @@ local Disp = Instance.new("ScrollingFrame", MainFrame)
 Disp.Size = UDim2.new(1, 0, 1, -170); Disp.Position = UDim2.new(0, 0, 0, 170)
 Disp.BackgroundTransparency = 1; Instance.new("UIListLayout", Disp)
 
--- Toggle Logic
 NoteBtn.MouseButton1Click:Connect(function()
     CollectNotes = not CollectNotes
     NoteBtn.Text = "Collect Notes: " .. (CollectNotes and "ON" or "OFF")
@@ -138,7 +128,7 @@ task.spawn(function()
         local char = Player.Character
         if not char then continue end
 
-        -- 1. STATIONARY REMOTE SELL (No Teleport)
+        -- 1. STATIONARY SELL
         if AutoSell then
             local tool = char:FindFirstChildOfClass("Tool")
             if tool and not KeepList[tool.Name] then
@@ -146,16 +136,25 @@ task.spawn(function()
             end
         end
 
-        -- 2. SCANNING & TRACKING
+        -- 2. DYNAMIC SCANNING
         local counts = {}
         local firstPos = {}
+        
+        -- Descendants scan for notes (in case they are in folders)
+        for _, obj in pairs(workspace:GetDescendants()) do
+            if CollectNotes and obj.Name == "Banknote" then
+                if obj:IsA("BasePart") then teleport(obj.Position) end
+            end
+        end
+
+        -- Direct Workspace scan for Tools (Performance)
         for _, obj in pairs(workspace:GetChildren()) do
-            if CollectNotes and obj.Name == "Banknote" then teleport(obj.Position) end
             if obj:IsA("Tool") and not Players:GetPlayerFromCharacter(obj.Parent) then
-                local p = obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart")
-                if p then
-                    local pos = p.Position
+                local handle = obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart")
+                if handle then
+                    local pos = handle.Position
                     local min = BoxPos - (BoxSize/2); local max = BoxPos + (BoxSize/2)
+                    
                     if (pos.X >= min.X and pos.X <= max.X) and (pos.Y >= min.Y and pos.Y <= max.Y) and (pos.Z >= min.Z and pos.Z <= max.Z) then
                         counts[obj.Name] = (counts[obj.Name] or 0) + 1
                         firstPos[obj.Name] = pos
@@ -164,7 +163,7 @@ task.spawn(function()
             end
         end
 
-        -- REFRESH ITEM LIST
+        -- UPDATE LIST
         for _, v in pairs(Disp:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
         for name, p in pairs(firstPos) do
             local b = Instance.new("TextButton", Disp)
