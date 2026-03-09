@@ -1,6 +1,6 @@
 --[[ 
-    ULTIMATE FARMING HUB (V20)
-    UI: Clean Tracker Tab (Pickup Only), Options Tab (Notes/Sell)
+    ULTIMATE FARMING HUB (V21) - HIGH SPEED EDITION
+    Optimizations: Separated High-Speed Sell Loop, Rapid Auto-Equip
 ]]
 
 local Players = game:GetService("Players")
@@ -29,7 +29,7 @@ end
 
 -- GUI Setup
 local ScreenGui = Instance.new("ScreenGui", Player.PlayerGui)
-ScreenGui.Name = "FarmHub_V20"
+ScreenGui.Name = "FarmHub_V21"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.DisplayOrder = 999
 
@@ -63,26 +63,22 @@ local FilterTabBtn = createTabBtn("KEEP", 0.66, 0.34)
 
 --- [[ PAGES ]] ---
 
--- 1. Tracker Page
 local TrackerPage = Instance.new("Frame", MainFrame)
 TrackerPage.Size = UDim2.new(1, -10, 1, -45); TrackerPage.Position = UDim2.new(0, 5, 0, 40)
 TrackerPage.BackgroundTransparency = 1; TrackerPage.Visible = true
 
 local PickTgl = Instance.new("TextButton", TrackerPage)
-PickTgl.Size = UDim2.new(1, 0, 0, 35)
-PickTgl.BackgroundColor3 = Color3.fromRGB(100, 30, 30)
+PickTgl.Size = UDim2.new(1, 0, 0, 35); PickTgl.BackgroundColor3 = Color3.fromRGB(100, 30, 30)
 PickTgl.Text = "AUTO-PICKUP: OFF"; PickTgl.TextColor3 = Color3.new(1,1,1)
-PickTgl.Font = Enum.Font.SourceSansBold
 
 local ListContainer = Instance.new("ScrollingFrame", TrackerPage)
 ListContainer.Size = UDim2.new(1, 0, 1, -40); ListContainer.Position = UDim2.new(0, 0, 0, 40)
 ListContainer.BackgroundTransparency = 1; Instance.new("UIListLayout", ListContainer)
 
--- 2. Options Page
 local OptionsPage = Instance.new("Frame", MainFrame)
 OptionsPage.Size = UDim2.new(1, -10, 1, -45); OptionsPage.Position = UDim2.new(0, 5, 0, 40)
 OptionsPage.BackgroundTransparency = 1; OptionsPage.Visible = false
-local OptLayout = Instance.new("UIListLayout", OptionsPage); OptLayout.Padding = UDim.new(0, 10)
+Instance.new("UIListLayout", OptionsPage).Padding = UDim.new(0, 10)
 
 local NoteTgl = Instance.new("TextButton", OptionsPage)
 NoteTgl.Size = UDim2.new(1, 0, 0, 35); NoteTgl.BackgroundColor3 = Color3.fromRGB(100, 30, 30)
@@ -92,7 +88,6 @@ local SellTgl = Instance.new("TextButton", OptionsPage)
 SellTgl.Size = UDim2.new(1, 0, 0, 35); SellTgl.BackgroundColor3 = Color3.fromRGB(100, 30, 30)
 SellTgl.Text = "AUTO-SELL: OFF"; SellTgl.TextColor3 = Color3.new(1,1,1)
 
--- 3. Filter Side Panel
 local FilterFrame = Instance.new("Frame", MainFrame)
 FilterFrame.Size = UDim2.new(0, 160, 1, 0); FilterFrame.Position = UDim2.new(1, 5, 0, 0)
 FilterFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25); FilterFrame.Visible = false
@@ -105,26 +100,23 @@ TrackerTabBtn.MouseButton1Click:Connect(function() TrackerPage.Visible = true; O
 OptionsTabBtn.MouseButton1Click:Connect(function() TrackerPage.Visible = false; OptionsPage.Visible = true; FilterFrame.Visible = false end)
 FilterTabBtn.MouseButton1Click:Connect(function() FilterFrame.Visible = not FilterFrame.Visible end)
 
--- Toggle Actions
+-- Toggles
 PickTgl.MouseButton1Click:Connect(function()
     AutoPickup = not AutoPickup
     PickTgl.Text = "AUTO-PICKUP: " .. (AutoPickup and "ON" or "OFF")
     PickTgl.BackgroundColor3 = AutoPickup and Color3.fromRGB(30, 100, 30) or Color3.fromRGB(100, 30, 30)
 end)
-
 NoteTgl.MouseButton1Click:Connect(function()
     CollectNotes = not CollectNotes
     NoteTgl.Text = "COLLECT NOTES: " .. (CollectNotes and "ON" or "OFF")
     NoteTgl.BackgroundColor3 = CollectNotes and Color3.fromRGB(30, 100, 30) or Color3.fromRGB(100, 30, 30)
 end)
-
 SellTgl.MouseButton1Click:Connect(function()
     AutoSell = not AutoSell
     SellTgl.Text = "AUTO-SELL: " .. (AutoSell and "ON" or "OFF")
     SellTgl.BackgroundColor3 = AutoSell and Color3.fromRGB(30, 100, 30) or Color3.fromRGB(100, 30, 30)
 end)
 
--- Initialize Filter Buttons
 for _, name in pairs(filterItems) do
     local b = Instance.new("TextButton", FilterList)
     b.Size = UDim2.new(1, 0, 0, 25); b.Text = name .. ": SELL"; b.BackgroundColor3 = Color3.fromRGB(60, 20, 20)
@@ -136,29 +128,37 @@ for _, name in pairs(filterItems) do
     end)
 end
 
---- [[ MAIN LOOP ]] ---
+--- [[ HIGH-SPEED SELL LOOP ]] ---
+task.spawn(function()
+    while task.wait(0.1) do -- 10 times per second
+        if AutoSell then
+            local char = Player.Character
+            local bp = Player:FindFirstChild("Backpack")
+            if char then
+                -- Rapid Equip
+                if bp then
+                    for _, tool in pairs(bp:GetChildren()) do
+                        if tool:IsA("Tool") and (KeepList[tool.Name] == false or KeepList[tool.Name] == nil) then
+                            tool.Parent = char
+                        end
+                    end
+                end
+                -- Rapid Fire Remote
+                local held = char:FindFirstChildOfClass("Tool")
+                if held and (KeepList[held.Name] == false or KeepList[held.Name] == nil) then
+                    SellRemote:FireServer()
+                end
+            end
+        end
+    end
+end)
+
+--- [[ SCANNER LOOP ]] ---
 task.spawn(function()
     while task.wait(0.4) do
         local char = Player.Character
-        local backpack = Player:FindFirstChild("Backpack")
         if not char then continue end
 
-        -- 1. AUTO-EQUIP & SELL
-        if AutoSell then
-            if backpack then
-                for _, tool in pairs(backpack:GetChildren()) do
-                    if tool:IsA("Tool") and (KeepList[tool.Name] == false or KeepList[tool.Name] == nil) then
-                        tool.Parent = char
-                    end
-                end
-            end
-            local held = char:FindFirstChildOfClass("Tool")
-            if held and (KeepList[held.Name] == false or KeepList[held.Name] == nil) then
-                SellRemote:FireServer()
-            end
-        end
-
-        -- 2. BANKNOTES
         if CollectNotes then
             for _, item in pairs(workspace:GetChildren()) do
                 if item.Name == "Banknote" then
@@ -168,9 +168,7 @@ task.spawn(function()
             end
         end
 
-        -- 3. TRACKER & PICKUP
-        local counts = {}
-        local firstPos = {}
+        local counts, firstPos = {}, {}
         for _, obj in pairs(workspace:GetChildren()) do
             if obj:IsA("Tool") and not Players:GetPlayerFromCharacter(obj.Parent) then
                 local h = obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart")
@@ -186,7 +184,6 @@ task.spawn(function()
             end
         end
 
-        -- Refresh Tracker List
         for _, v in pairs(ListContainer:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
         for name, p in pairs(firstPos) do
             local b = Instance.new("TextButton", ListContainer)
