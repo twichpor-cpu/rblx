@@ -1,6 +1,6 @@
 --[[ 
-    ULTRA-OPTIMIZED ITEM TRACKER (V7)
-    Features: Close Button, HH:MM:SS Clock, Persistent UI, Distance Tracking
+    ULTRA-OPTIMIZED ITEM TRACKER (V8)
+    Features: Scraped Custom Clock, Close Button, Persistent UI, Distance Tracking
 ]]
 
 local Players = game:GetService("Players")
@@ -14,8 +14,18 @@ local BoxPos = Vector3.new(5662.36, 720.27, -1317.86)
 local SpawnAreas = workspace:FindFirstChild("ItemSpawnAreas")
 local CollectNotes = false
 
--- Helper: Format Seconds to HH:MM:SS
-local function formatTime(s)
+-- Path to the game's custom clock
+local CustomClockPath = Player:WaitForChild("PlayerGui"):FindFirstChild("UIs") 
+    and Player.PlayerGui.UIs:FindFirstChild("VersionUI") 
+    and Player.PlayerGui.UIs.VersionUI:FindFirstChild("Time")
+
+-- Helper: Get Custom Time String
+local function getGameTime()
+    if CustomClockPath and CustomClockPath:IsA("TextLabel") then
+        return CustomClockPath.Text
+    end
+    -- Fallback if path is wrong or GUI is missing
+    local s = time()
     local hours = math.floor(s / 3600)
     local mins = math.floor((s % 3600) / 60)
     local secs = math.floor(s % 60)
@@ -39,7 +49,7 @@ end
 
 -- GUI Setup
 local ScreenGui = Instance.new("ScreenGui", Player:WaitForChild("PlayerGui"))
-ScreenGui.Name = "PersistentTracker_V7"
+ScreenGui.Name = "PersistentTracker_V8"
 ScreenGui.ResetOnSpawn = false 
 
 local MainFrame = Instance.new("Frame", ScreenGui)
@@ -51,13 +61,12 @@ MainFrame.BorderSizePixel = 0
 local TitleBar = Instance.new("TextLabel", MainFrame)
 TitleBar.Size = UDim2.new(1, 0, 0, 30)
 TitleBar.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-TitleBar.Text = "SERVER: 00:00:00"
+TitleBar.Text = "SERVER: --:--:--"
 TitleBar.TextColor3 = Color3.new(1, 1, 1)
 TitleBar.Font = Enum.Font.Code
 TitleBar.TextXAlignment = Enum.TextXAlignment.Left
 TitleBar.Position = UDim2.new(0, 5, 0, 0)
 
--- [[ CLOSE BUTTON ]] --
 local CloseBtn = Instance.new("TextButton", MainFrame)
 CloseBtn.Size = UDim2.new(0, 30, 0, 30)
 CloseBtn.Position = UDim2.new(1, -30, 0, 0)
@@ -67,9 +76,7 @@ CloseBtn.TextColor3 = Color3.new(1, 1, 1)
 CloseBtn.Font = Enum.Font.SourceSansBold
 CloseBtn.BorderSizePixel = 0
 
-CloseBtn.MouseButton1Click:Connect(function()
-    ScreenGui:Destroy()
-end)
+CloseBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
 
 local NoteBtn = Instance.new("TextButton", MainFrame)
 NoteBtn.Size = UDim2.new(0.9, 0, 0, 35)
@@ -111,7 +118,7 @@ end)
 task.spawn(function()
     while ScreenGui and ScreenGui.Parent do
         task.wait(0.5)
-        TitleBar.Text = "SERVER: " .. formatTime(time())
+        TitleBar.Text = "SERVER: " .. getGameTime()
         
         local counts = {}
         local firstPos = {}
@@ -137,7 +144,7 @@ task.spawn(function()
                         
                         if (p.X >= min.X and p.X <= max.X) and (p.Y >= min.Y and p.Y <= max.Y) and (p.Z >= min.Z and p.Z <= max.Z) then
                             counts[obj.Name] = (counts[obj.Name] or 0) + 1
-                            if not firstPos[obj.Name] or dist < firstPos[obj.Name].dist then
+                            if not firstPos[obj.Name] or dist < (firstPos[obj.Name].dist or 99999) then
                                 firstPos[obj.Name] = {pos = p, dist = dist}
                             end
                         end
