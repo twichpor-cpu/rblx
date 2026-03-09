@@ -1,6 +1,6 @@
 --[[ 
-    ULTRA-OPTIMIZED ITEM TRACKER (V6)
-    Features: HH:MM:SS Clock, Persistent UI, Distance Tracking
+    ULTRA-OPTIMIZED ITEM TRACKER (V7)
+    Features: Close Button, HH:MM:SS Clock, Persistent UI, Distance Tracking
 ]]
 
 local Players = game:GetService("Players")
@@ -39,7 +39,7 @@ end
 
 -- GUI Setup
 local ScreenGui = Instance.new("ScreenGui", Player:WaitForChild("PlayerGui"))
-ScreenGui.Name = "PersistentTracker_V6"
+ScreenGui.Name = "PersistentTracker_V7"
 ScreenGui.ResetOnSpawn = false 
 
 local MainFrame = Instance.new("Frame", ScreenGui)
@@ -54,6 +54,22 @@ TitleBar.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 TitleBar.Text = "SERVER: 00:00:00"
 TitleBar.TextColor3 = Color3.new(1, 1, 1)
 TitleBar.Font = Enum.Font.Code
+TitleBar.TextXAlignment = Enum.TextXAlignment.Left
+TitleBar.Position = UDim2.new(0, 5, 0, 0)
+
+-- [[ CLOSE BUTTON ]] --
+local CloseBtn = Instance.new("TextButton", MainFrame)
+CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseBtn.Position = UDim2.new(1, -30, 0, 0)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.new(1, 1, 1)
+CloseBtn.Font = Enum.Font.SourceSansBold
+CloseBtn.BorderSizePixel = 0
+
+CloseBtn.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+end)
 
 local NoteBtn = Instance.new("TextButton", MainFrame)
 NoteBtn.Size = UDim2.new(0.9, 0, 0, 35)
@@ -93,8 +109,8 @@ end)
 
 -- Main Optimized Loop
 task.spawn(function()
-    while task.wait(0.5) do
-        -- Update Server Time to HH:MM:SS
+    while ScreenGui and ScreenGui.Parent do
+        task.wait(0.5)
         TitleBar.Text = "SERVER: " .. formatTime(time())
         
         local counts = {}
