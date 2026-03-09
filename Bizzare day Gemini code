@@ -1,6 +1,6 @@
 --[[ 
-    ADVANCED UTILITY HUB (V17)
-    Optimizations: Tabbed UI, Fixed Banknote Scan, Auto-Pickup Logic
+    ULTIMATE FARMING HUB (V18)
+    Features: Auto-Equip, Auto-Pickup, Stationary Remote Sell, Fixed Banknote TP
 ]]
 
 local Players = game:GetService("Players")
@@ -25,19 +25,19 @@ end
 
 -- GUI Setup
 local ScreenGui = Instance.new("ScreenGui", Player.PlayerGui)
-ScreenGui.Name = "UtilityHub_V17"
+ScreenGui.Name = "FarmHub_V18"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.DisplayOrder = 999
 
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 240, 0, 350)
+MainFrame.Size = UDim2.new(0, 240, 0, 380)
 MainFrame.Position = UDim2.new(0.1, 0, 0.3, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Draggable = true
 
--- Close Button (Stays Visible)
+-- Close Button
 local CloseBtn = Instance.new("TextButton", MainFrame)
 CloseBtn.Size = UDim2.new(0, 30, 0, 30)
 CloseBtn.Position = UDim2.new(1, -30, 0, 0)
@@ -46,7 +46,7 @@ CloseBtn.Text = "X"; CloseBtn.TextColor3 = Color3.new(1,1,1)
 CloseBtn.ZIndex = 1000
 CloseBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
 
--- Navigation Tabs
+-- Navigation
 local Nav = Instance.new("Frame", MainFrame)
 Nav.Size = UDim2.new(1, -30, 0, 30)
 Nav.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
@@ -54,7 +54,7 @@ Nav.BorderSizePixel = 0
 
 local function createTabBtn(txt, x)
     local b = Instance.new("TextButton", Nav)
-    b.Size = UDim2.new(0.33, 0, 1, 0)
+    b.Size = UDim2.new(0.5, 0, 1, 0)
     b.Position = UDim2.new(x, 0, 0, 0)
     b.BackgroundTransparency = 1
     b.Text = txt; b.TextColor3 = Color3.new(1, 1, 1)
@@ -62,75 +62,67 @@ local function createTabBtn(txt, x)
     return b
 end
 
-local TrackerTabBtn = createTabBtn("TRACK", 0)
-local OptionsTabBtn = createTabBtn("OPTS", 0.33)
-local FilterTabBtn = createTabBtn("KEEP", 0.66)
+local TrackerTabBtn = createTabBtn("TRACKER", 0)
+local FilterTabBtn = createTabBtn("KEEP LIST", 0.5)
 
 --- [[ PAGES ]] ---
 
--- 1. Tracker Page (Item List)
-local TrackerPage = Instance.new("ScrollingFrame", MainFrame)
+-- 1. Tracker Page
+local TrackerPage = Instance.new("Frame", MainFrame)
 TrackerPage.Size = UDim2.new(1, -10, 1, -45); TrackerPage.Position = UDim2.new(0, 5, 0, 40)
 TrackerPage.BackgroundTransparency = 1; TrackerPage.Visible = true
-TrackerPage.ScrollBarThickness = 2
-Instance.new("UIListLayout", TrackerPage)
 
--- 2. Options Page (Buttons)
-local OptionsPage = Instance.new("Frame", MainFrame)
-OptionsPage.Size = UDim2.new(1, -10, 1, -45); OptionsPage.Position = UDim2.new(0, 5, 0, 40)
-OptionsPage.BackgroundTransparency = 1; OptionsPage.Visible = false
-local OptLayout = Instance.new("UIListLayout", OptionsPage)
-OptLayout.Padding = UDim.new(0, 8)
+local PickTgl = Instance.new("TextButton", TrackerPage)
+PickTgl.Size = UDim2.new(1, 0, 0, 30)
+PickTgl.BackgroundColor3 = Color3.fromRGB(100, 30, 30)
+PickTgl.Text = "AUTO-PICKUP: OFF"; PickTgl.TextColor3 = Color3.new(1,1,1)
 
--- 3. Filter Sidebar
+local NoteTgl = Instance.new("TextButton", TrackerPage)
+NoteTgl.Size = UDim2.new(1, 0, 0, 30); NoteTgl.Position = UDim2.new(0, 0, 0, 35)
+NoteTgl.BackgroundColor3 = Color3.fromRGB(100, 30, 30)
+NoteTgl.Text = "BANKNOTES: OFF"; NoteTgl.TextColor3 = Color3.new(1,1,1)
+
+local SellTgl = Instance.new("TextButton", TrackerPage)
+SellTgl.Size = UDim2.new(1, 0, 0, 30); SellTgl.Position = UDim2.new(0, 0, 0, 70)
+SellTgl.BackgroundColor3 = Color3.fromRGB(100, 30, 30)
+SellTgl.Text = "AUTO-SELL: OFF"; SellTgl.TextColor3 = Color3.new(1,1,1)
+
+local ListContainer = Instance.new("ScrollingFrame", TrackerPage)
+ListContainer.Size = UDim2.new(1, 0, 1, -110); ListContainer.Position = UDim2.new(0, 0, 0, 110)
+ListContainer.BackgroundTransparency = 1; ListContainer.ScrollBarThickness = 2
+Instance.new("UIListLayout", ListContainer)
+
+-- 2. Filter Page (Side Panel)
 local FilterFrame = Instance.new("Frame", MainFrame)
 FilterFrame.Size = UDim2.new(0, 160, 1, 0); FilterFrame.Position = UDim2.new(1, 5, 0, 0)
 FilterFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25); FilterFrame.Visible = false
-FilterFrame.BorderSizePixel = 0
-
 local FilterList = Instance.new("ScrollingFrame", FilterFrame)
-FilterList.Size = UDim2.new(1, -5, 1, -10); FilterList.Position = UDim2.new(0, 2, 0, 5)
-FilterList.BackgroundTransparency = 1; FilterList.ScrollBarThickness = 2
+FilterList.Size = UDim2.new(1, 0, 1, 0); FilterList.BackgroundTransparency = 1
 Instance.new("UIListLayout", FilterList)
 
--- Tab Navigation Logic
-TrackerTabBtn.MouseButton1Click:Connect(function() TrackerPage.Visible = true; OptionsPage.Visible = false end)
-OptionsTabBtn.MouseButton1Click:Connect(function() TrackerPage.Visible = false; OptionsPage.Visible = true end)
+-- Toggle Actions
+TrackerTabBtn.MouseButton1Click:Connect(function() FilterFrame.Visible = false end)
 FilterTabBtn.MouseButton1Click:Connect(function() FilterFrame.Visible = not FilterFrame.Visible end)
 
---- [[ OPTION BUTTONS ]] ---
-local function createToggle(txt, parent)
-    local b = Instance.new("TextButton", parent)
-    b.Size = UDim2.new(1, 0, 0, 35); b.BackgroundColor3 = Color3.fromRGB(100, 30, 30)
-    b.Text = txt .. ": OFF"; b.TextColor3 = Color3.new(1,1,1)
-    b.Font = Enum.Font.SourceSans
-    b.BorderSizePixel = 0
-    return b
-end
-
-local NoteTgl = createToggle("Collect Banknotes", OptionsPage)
-local SellTgl = createToggle("Auto-Sell", OptionsPage)
-local PickTgl = createToggle("Auto-Pickup", OptionsPage)
+PickTgl.MouseButton1Click:Connect(function()
+    AutoPickup = not AutoPickup
+    PickTgl.Text = "AUTO-PICKUP: " .. (AutoPickup and "ON" or "OFF")
+    PickTgl.BackgroundColor3 = AutoPickup and Color3.fromRGB(30, 100, 30) or Color3.fromRGB(100, 30, 30)
+end)
 
 NoteTgl.MouseButton1Click:Connect(function()
     CollectNotes = not CollectNotes
-    NoteTgl.Text = "Banknotes: " .. (CollectNotes and "ON" or "OFF")
+    NoteTgl.Text = "BANKNOTES: " .. (CollectNotes and "ON" or "OFF")
     NoteTgl.BackgroundColor3 = CollectNotes and Color3.fromRGB(30, 100, 30) or Color3.fromRGB(100, 30, 30)
 end)
 
 SellTgl.MouseButton1Click:Connect(function()
     AutoSell = not AutoSell
-    SellTgl.Text = "Auto-Sell: " .. (AutoSell and "ON" or "OFF")
+    SellTgl.Text = "AUTO-SELL: " .. (AutoSell and "ON" or "OFF")
     SellTgl.BackgroundColor3 = AutoSell and Color3.fromRGB(30, 100, 30) or Color3.fromRGB(100, 30, 30)
 end)
 
-PickTgl.MouseButton1Click:Connect(function()
-    AutoPickup = not AutoPickup
-    PickTgl.Text = "Auto-Pickup: " .. (AutoPickup and "ON" or "OFF")
-    PickTgl.BackgroundColor3 = AutoPickup and Color3.fromRGB(30, 100, 30) or Color3.fromRGB(100, 30, 30)
-end)
-
---- [[ POPULATE FILTER ]] ---
+-- Filter Items
 local filterItems = {"Arrow", "Rokakaka", "Mysterious Arrow", "Pure Rokakaka", "Ribcage", "Dio's Bone", "Ancient Arrow", "Requiem Arrow"}
 for _, name in pairs(filterItems) do
     local b = Instance.new("TextButton", FilterList)
@@ -147,55 +139,63 @@ end
 task.spawn(function()
     while task.wait(0.5) do
         local char = Player.Character
+        local bp = Player:FindFirstChild("Backpack")
         if not char then continue end
 
-        -- 1. Stationary Auto-Sell
+        -- 1. AUTO-EQUIP & SELL
         if AutoSell then
-            local heldTool = char:FindFirstChildOfClass("Tool")
-            if heldTool and not KeepList[heldTool.Name] then
+            -- Equip logic
+            if bp then
+                for _, tool in pairs(bp:GetChildren()) do
+                    if tool:IsA("Tool") and not KeepList[tool.Name] then
+                        tool.Parent = char -- Auto-equips it
+                    end
+                end
+            end
+            -- Sell logic
+            local held = char:FindFirstChildOfClass("Tool")
+            if held and not KeepList[held.Name] then
                 SellRemote:FireServer()
             end
         end
 
-        -- 2. Scans & Logic
+        -- 2. SCANS
         local counts = {}
         local firstPos = {}
 
-        -- Check Workspace Directly for Banknotes (Faster)
+        -- Banknote direct workspace check
         if CollectNotes then
             for _, item in pairs(workspace:GetChildren()) do
                 if item.Name == "Banknote" then
-                    local p = item:IsA("BasePart") and item.Position or item:FindFirstChildWhichIsA("BasePart") and item:FindFirstChildWhichIsA("BasePart").Position
+                    local p = item:IsA("BasePart") and item.Position or item:FindFirstChildWhichIsA("BasePart").Position
                     if p then teleport(p) end
                 end
             end
         end
 
-        -- Tracker & Auto-Pickup Scan
+        -- Tracker & Pickup
         for _, obj in pairs(workspace:GetChildren()) do
             if obj:IsA("Tool") and not Players:GetPlayerFromCharacter(obj.Parent) then
                 local h = obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart")
                 if h then
                     local p = h.Position
                     local min = BoxPos - (BoxSize/2); local max = BoxPos + (BoxSize/2)
-                    
                     if (p.X >= min.X and p.X <= max.X) and (p.Y >= min.Y and p.Y <= max.Y) and (p.Z >= min.Z and p.Z <= max.Z) then
                         counts[obj.Name] = (counts[obj.Name] or 0) + 1
                         firstPos[obj.Name] = p
-                        if AutoPickup then teleport(p) end -- Loot!
+                        if AutoPickup then teleport(p) end
                     end
                 end
             end
         end
 
-        -- Update Item List UI
-        for _, v in pairs(TrackerPage:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
+        -- Refresh List
+        for _, v in pairs(ListContainer:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
         for name, p in pairs(firstPos) do
-            local b = Instance.new("TextButton", TrackerPage)
+            local b = Instance.new("TextButton", ListContainer)
             b.Size = UDim2.new(1, 0, 0, 22); b.Text = " " .. name .. " x" .. counts[name]
             b.TextColor3 = Color3.new(1,1,1); b.BackgroundTransparency = 0.9
             b.TextXAlignment = Enum.TextXAlignment.Left
-            b.BorderSizePixel = 0
             b.MouseButton1Click:Connect(function() teleport(p) end)
         end
     end
