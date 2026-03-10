@@ -1,6 +1,6 @@
 --[[ 
-    ULTIMATE FARMING HUB (V35)
-    Updates: Restored Filter Panels, Integrated NPC Farm & Item Filters.
+    ULTIMATE FARMING HUB (V35 - LIGHT)
+    Updates: Removed NPC Farm & Hover Distance. Focused on Item Management.
 ]]
 
 local Players = game:GetService("Players")
@@ -17,19 +17,16 @@ local BoxPos = Vector3.new(5662.36, 720.27, -1317.86)
 local CollectNotes = false
 local AutoSell = false
 local AutoPickup = false
-local AutoFarmNPC = false
-local HoverDistance = 12
 local CurrentFilterMode = nil 
 
 local SellFilter = {}   
 local PickupFilter = {} 
-local TargetNPCs = {"DIO", "Funny Valentine", "Dio Brando", "Vampiric Minion"}
 
 local defaultItems = {
     "Water", "Arrow", "Rokakaka Fruit", "Frog", "Requiem Arrow", "Vampire Mask", 
     "DIOS's Diary", "Camera", "Shadow Camera", "Holy Corpse", "Nostalgic Relic", 
     "Shiny Gem", "Monochromatic Sphere", "Ender Pearl", "Golden Mask",
-    "Special Present", "White Present", "Red Present", "Green Present", "Billy's Cookie",
+    "Special Present", "White".." Present", "Red".." Present", "Green".." Present", "Billy's Cookie",
     "Pumpkin", "Spiritual Rapier", "Witche's Brew", "Marbleized Mask", 
     "Vulcanic Mask", "Admin Arrow", "Unfair Frog", "troll banknote"
 }
@@ -57,10 +54,10 @@ end
 
 -- GUI Setup
 local ScreenGui = Instance.new("ScreenGui", Player.PlayerGui)
-ScreenGui.Name = "FarmHub_V35"; ScreenGui.ResetOnSpawn = false
+ScreenGui.Name = "FarmHub_V35_Light"; ScreenGui.ResetOnSpawn = false
 
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 240, 0, 420); MainFrame.Position = UDim2.new(0.1, 0, 0.3, 0)
+MainFrame.Size = UDim2.new(0, 240, 0, 320); MainFrame.Position = UDim2.new(0.1, 0, 0.3, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15); MainFrame.Active = true; MainFrame.BorderSizePixel = 0
 
 -- DRAGGING
@@ -157,19 +154,11 @@ local PickFilterBtn = createSubBtn("Configure Pickup Filter")
 local SellTgl = createMainOpt("AUTO-SELL: OFF", Color3.fromRGB(100, 30, 30))
 local SellFilterBtn = createSubBtn("Configure Sell Filter")
 local NoteTgl = createMainOpt("COLLECT NOTES: OFF", Color3.fromRGB(100, 30, 30))
-local NpcTgl = createMainOpt("AUTO-FARM NPC: OFF", Color3.fromRGB(100, 30, 30))
-
--- Hover Input
-local DistanceFrame = Instance.new("Frame", OptionsPage); DistanceFrame.Size = UDim2.new(1, -5, 0, 30); DistanceFrame.BackgroundTransparency = 1
-local DistLabel = Instance.new("TextLabel", DistanceFrame); DistLabel.Size = UDim2.new(0.6, 0, 1, 0); DistLabel.Text = "Hover Distance:"; DistLabel.TextColor3 = Color3.new(1,1,1); DistLabel.BackgroundTransparency = 1
-local DistInput = Instance.new("TextBox", DistanceFrame); DistInput.Size = UDim2.new(0.4, 0, 1, 0); DistInput.Position = UDim2.new(0.6, 0, 0, 0); DistInput.Text = tostring(HoverDistance); DistInput.BackgroundColor3 = Color3.fromRGB(40,40,40); DistInput.TextColor3 = Color3.new(1,1,1)
-DistInput.FocusLost:Connect(function() HoverDistance = tonumber(DistInput.Text) or 12 end)
 
 -- Interaction Connects
 PickTgl.MouseButton1Click:Connect(function() AutoPickup = not AutoPickup; PickTgl.Text = "AUTO-PICKUP: " .. (AutoPickup and "ON" or "OFF"); PickTgl.BackgroundColor3 = AutoPickup and Color3.fromRGB(30, 100, 30) or Color3.fromRGB(100, 30, 30) end)
 SellTgl.MouseButton1Click:Connect(function() AutoSell = not AutoSell; SellTgl.Text = "AUTO-SELL: " .. (AutoSell and "ON" or "OFF"); SellTgl.BackgroundColor3 = AutoSell and Color3.fromRGB(30, 100, 30) or Color3.fromRGB(100, 30, 30) end)
 NoteTgl.MouseButton1Click:Connect(function() CollectNotes = not CollectNotes; NoteTgl.Text = "COLLECT NOTES: " .. (CollectNotes and "ON" or "OFF"); NoteTgl.BackgroundColor3 = CollectNotes and Color3.fromRGB(30, 100, 30) or Color3.fromRGB(100, 30, 30) end)
-NpcTgl.MouseButton1Click:Connect(function() AutoFarmNPC = not AutoFarmNPC; NpcTgl.Text = "AUTO-FARM NPC: " .. (AutoFarmNPC and "ON" or "OFF"); NpcTgl.BackgroundColor3 = AutoFarmNPC and Color3.fromRGB(30, 100, 30) or Color3.fromRGB(100, 30, 30) end)
 
 PickFilterBtn.MouseButton1Click:Connect(function() openFilter("PICKUP", false) end)
 SellFilterBtn.MouseButton1Click:Connect(function() openFilter("SELL", false) end)
@@ -177,31 +166,6 @@ TrackerTabBtn.MouseButton1Click:Connect(function() TrackerPage.Visible = true; O
 OptionsTabBtn.MouseButton1Click:Connect(function() TrackerPage.Visible = false; OptionsPage.Visible = true; FilterFrame.Visible = false end)
 
 -- LOOPS
-task.spawn(function()
-    while Running and task.wait() do
-        if AutoFarmNPC then
-            local Entities = workspace:FindFirstChild("Entities")
-            local targetFound = false
-            if Entities then
-                for _, npc in pairs(Entities:GetChildren()) do
-                    local isTarget = false
-                    for _, name in pairs(TargetNPCs) do if string.find(npc.Name, name) then isTarget = true break end end
-                    if isTarget and not npc:FindFirstChild("Dead") then
-                        local hrp = npc:FindFirstChild("HumanoidRootPart")
-                        if hrp and Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
-                            Player.Character.HumanoidRootPart.CFrame = hrp.CFrame * CFrame.new(0, HoverDistance, 0) * CFrame.Angles(math.rad(-90), 0, 0)
-                            targetFound = true; break
-                        end
-                    end
-                end
-            end
-            if not targetFound and Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
-                Player.Character.HumanoidRootPart.CFrame = CFrame.new(BoxPos + Vector3.new(0, 5, 0))
-            end
-        end
-    end
-end)
-
 task.spawn(function()
     while Running and task.wait(0.4) do
         if CollectNotes then
