@@ -1,12 +1,16 @@
 --[[ 
-    ULTIMATE FARMING HUB (V30)
-    Updates: Fixed Dragging Logic, Implemented Stealth "firetouchinterest" Pickup
+    ULTIMATE FARMING HUB (V33)
+    Updates: Termination Logic (X button kills all background loops).
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 local Player = Players.LocalPlayer
+
+-- Global Script State
+local Running = true 
 
 -- Configuration
 local BoxPos = Vector3.new(5662.36, 720.27, -1317.86)
@@ -34,82 +38,84 @@ end
 
 local SellRemote = ReplicatedStorage:WaitForChild("BismalqStuff"):WaitForChild("Remotes"):WaitForChild("Sell")
 
--- Helper: Stealth Touch (No Teleport)
-local function stealthTouch(targetPart)
+-- Helper: GHOST TOUCH
+local function ghostTouch(tool)
+    if not Running then return end
     local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-    if root and targetPart and firetouchinterest then
-        firetouchinterest(root, targetPart, 0)
-        task.wait()
-        firetouchinterest(root, targetPart, 1)
-    elseif root and targetPart then
-        -- Fallback to TP if executor doesn't support firetouchinterest
-        root.CFrame = CFrame.new(targetPart.Position)
+    local handle = tool:FindFirstChild("Handle") or tool:FindFirstChildWhichIsA("BasePart")
+    
+    if root and handle and tool.Parent == workspace then
+        if firetouchinterest then
+            firetouchinterest(root, handle, 0)
+            task.wait()
+            firetouchinterest(root, handle, 1)
+        end
     end
 end
 
 -- GUI Setup
 local ScreenGui = Instance.new("ScreenGui", Player.PlayerGui)
-ScreenGui.Name = "FarmHub_V30"
+ScreenGui.Name = "FarmHub_V33"
 ScreenGui.ResetOnSpawn = false
 
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 240, 0, 400); MainFrame.Position = UDim2.new(0.1, 0, 0.3, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15); MainFrame.Active = true
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15); MainFrame.Active = true; MainFrame.BorderSizePixel = 0
 
--- CUSTOM DRAGGING LOGIC
-local dragging, dragInput, dragStart, startPos
-local function update(input)
-    local delta = input.Position - dragStart
-    MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-end
+-- DRAGGING
+local dragToggle, dragStart, startPos
 MainFrame.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true; dragStart = input.Position; startPos = MainFrame.Position
-        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+        dragToggle = true; dragStart = input.Position; startPos = MainFrame.Position
     end
 end)
-MainFrame.InputChanged:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseMovement then dragInput = input end end)
-UserInputService.InputChanged:Connect(function(input) if input == dragInput and dragging then update(input) end end)
+MainFrame.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then dragToggle = false end
+end)
+RunService.RenderStepped:Connect(function()
+    if Running and dragToggle then
+        local delta = UserInputService:GetMouseLocation() - Vector2.new(dragStart.X, dragStart.Y)
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y - 36)
+    end
+end)
 
+-- TERMINATION LOGIC
 local CloseBtn = Instance.new("TextButton", MainFrame)
 CloseBtn.Size = UDim2.new(0, 30, 0, 30); CloseBtn.Position = UDim2.new(1, -30, 0, 0)
 CloseBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40); CloseBtn.Text = "X"; CloseBtn.TextColor3 = Color3.new(1,1,1); CloseBtn.ZIndex = 10
-CloseBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
+CloseBtn.MouseButton1Click:Connect(function() 
+    Running = false -- This breaks all task.spawn loops
+    ScreenGui:Destroy() 
+end)
 
+-- (Navigation, Tabs, Pages, and Filters logic remain the same for stability...)
 local Nav = Instance.new("Frame", MainFrame)
 Nav.Size = UDim2.new(1, -30, 0, 30); Nav.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 
 local function createTabBtn(txt, x)
     local b = Instance.new("TextButton", Nav); b.Size = UDim2.new(0.5, 0, 1, 0); b.Position = UDim2.new(x, 0, 0, 0)
-    b.BackgroundTransparency = 1; b.Text = txt; b.TextColor3 = Color3.new(1, 1, 1); b.Font = Enum.Font.Code
-    return b
+    b.BackgroundTransparency = 1; b.Text = txt; b.TextColor3 = Color3.new(1, 1, 1); b.Font = Enum.Font.Code; return b
 end
 
 local TrackerTabBtn = createTabBtn("TRACKER", 0)
 local OptionsTabBtn = createTabBtn("OPTIONS", 0.5)
 
--- Pages
 local TrackerPage = Instance.new("ScrollingFrame", MainFrame)
-TrackerPage.Size = UDim2.new(1, -10, 1, -45); TrackerPage.Position = UDim2.new(0, 5, 0, 40)
-TrackerPage.BackgroundTransparency = 1; TrackerPage.Visible = true; TrackerPage.AutomaticCanvasSize = Enum.AutomaticSize.Y
-TrackerPage.ScrollBarThickness = 2; Instance.new("UIListLayout", TrackerPage)
+TrackerPage.Size = UDim2.new(1, -10, 1, -45); TrackerPage.Position = UDim2.new(0, 5, 0, 40); TrackerPage.BackgroundTransparency = 1; TrackerPage.Visible = true; TrackerPage.AutomaticCanvasSize = Enum.AutomaticSize.Y; TrackerPage.ScrollBarThickness = 2
+Instance.new("UIListLayout", TrackerPage)
 
 local OptionsPage = Instance.new("ScrollingFrame", MainFrame)
-OptionsPage.Size = UDim2.new(1, -10, 1, -45); OptionsPage.Position = UDim2.new(0, 5, 0, 40)
-OptionsPage.BackgroundTransparency = 1; OptionsPage.Visible = false; OptionsPage.AutomaticCanvasSize = Enum.AutomaticSize.Y
-OptionsPage.ScrollBarThickness = 2; local OptLayout = Instance.new("UIListLayout", OptionsPage); OptLayout.Padding = UDim.new(0, 8)
+OptionsPage.Size = UDim2.new(1, -10, 1, -45); OptionsPage.Position = UDim2.new(0, 5, 0, 40); OptionsPage.BackgroundTransparency = 1; OptionsPage.Visible = false; OptionsPage.AutomaticCanvasSize = Enum.AutomaticSize.Y; OptionsPage.ScrollBarThickness = 2
+local OptLayout = Instance.new("UIListLayout", OptionsPage); OptLayout.Padding = UDim.new(0, 8)
 
--- Filter Panel
 local FilterFrame = Instance.new("Frame", MainFrame)
-FilterFrame.Size = UDim2.new(0, 180, 1, 0); FilterFrame.Position = UDim2.new(1, 5, 0, 0)
-FilterFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25); FilterFrame.Visible = false
+FilterFrame.Size = UDim2.new(0, 180, 1, 0); FilterFrame.Position = UDim2.new(1, 5, 0, 0); FilterFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25); FilterFrame.Visible = false
 
 local BulkActions = Instance.new("Frame", FilterFrame)
 BulkActions.Size = UDim2.new(1, 0, 0, 30); BulkActions.BackgroundColor3 = Color3.fromRGB(40,40,40)
 
 local FilterScroll = Instance.new("ScrollingFrame", FilterFrame)
-FilterScroll.Size = UDim2.new(1, 0, 1, -35); FilterScroll.Position = UDim2.new(0,0,0,35); FilterScroll.BackgroundTransparency = 1
-FilterScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y; FilterScroll.ScrollBarThickness = 4
+FilterScroll.Size = UDim2.new(1, 0, 1, -35); FilterScroll.Position = UDim2.new(0,0,0,35); FilterScroll.BackgroundTransparency = 1; FilterScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y; FilterScroll.ScrollBarThickness = 4
 Instance.new("UIListLayout", FilterScroll)
 
 local function openFilter(mode, isRefresh)
@@ -132,11 +138,9 @@ local function openFilter(mode, isRefresh)
         local b = Instance.new("TextButton", FilterScroll); b.Size = UDim2.new(1, 0, 0, 25); b.TextColor3 = Color3.new(1,1,1); b.TextSize = 11; b.BorderSizePixel = 0
         local function updateStyle()
             if mode == "SELL" then
-                b.Text = name .. (SellFilter[name] and ": KEEP" or ": SELL")
-                b.BackgroundColor3 = SellFilter[name] and Color3.fromRGB(20, 60, 20) or Color3.fromRGB(60, 20, 20)
+                b.Text = name .. (SellFilter[name] and ": KEEP" or ": SELL"); b.BackgroundColor3 = SellFilter[name] and Color3.fromRGB(20, 60, 20) or Color3.fromRGB(60, 20, 20)
             else
-                b.Text = name .. (PickupFilter[name] and ": PICKUP" or ": IGNORE")
-                b.BackgroundColor3 = PickupFilter[name] and Color3.fromRGB(20, 60, 20) or Color3.fromRGB(60, 20, 20)
+                b.Text = name .. (PickupFilter[name] and ": PICKUP" or ": IGNORE"); b.BackgroundColor3 = PickupFilter[name] and Color3.fromRGB(20, 60, 20) or Color3.fromRGB(60, 20, 20)
             end
         end
         b.MouseButton1Click:Connect(function() if mode == "SELL" then SellFilter[name] = not SellFilter[name] else PickupFilter[name] = not PickupFilter[name] end; updateStyle() end)
@@ -167,13 +171,15 @@ NoteTgl.MouseButton1Click:Connect(function() CollectNotes = not CollectNotes; No
 PickFilterBtn.MouseButton1Click:Connect(function() openFilter("PICKUP", false) end)
 SellFilterBtn.MouseButton1Click:Connect(function() openFilter("SELL", false) end)
 
--- LOOPS
+-- LOOPS WITH RUNNING CHECK
 task.spawn(function()
-    while task.wait(0.1) do
+    while Running and task.wait(0.1) do
         if AutoSell then
             local bp = Player:FindFirstChild("Backpack")
             if Player.Character and bp then
-                for _, tool in pairs(bp:GetChildren()) do if tool:IsA("Tool") and not SellFilter[tool.Name] then tool.Parent = Player.Character end end
+                for _, tool in pairs(bp:GetChildren()) do 
+                    if tool:IsA("Tool") and not SellFilter[tool.Name] then tool.Parent = Player.Character end 
+                end
             end
             local held = Player.Character and Player.Character:FindFirstChildOfClass("Tool")
             if held and not SellFilter[held.Name] then SellRemote:FireServer() end
@@ -182,29 +188,26 @@ task.spawn(function()
 end)
 
 task.spawn(function()
-    while task.wait(0.4) do
+    while Running and task.wait(0.4) do
         if CollectNotes then
             for _, item in pairs(workspace:GetChildren()) do
-                if item.Name == "Banknote" or item.Name == "troll banknote" then 
-                    local h = item:FindFirstChildWhichIsA("BasePart") or (item:IsA("BasePart") and item)
-                    if h then stealthTouch(h) end
-                end
+                if item.Name == "Banknote" or item.Name == "troll banknote" then ghostTouch(item) end
             end
         end
-        local counts, firstPart = {}, {}
+        local counts, firstTool = {}, {}
         for _, obj in pairs(workspace:GetChildren()) do
             if obj:IsA("Tool") and not Players:GetPlayerFromCharacter(obj.Parent) then
                 local h = obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart")
-                if h and (h.Position - BoxPos).Magnitude < 700 then
-                    counts[obj.Name] = (counts[obj.Name] or 0) + 1; firstPart[obj.Name] = h
-                    if AutoPickup and PickupFilter[obj.Name] then stealthTouch(h) end
+                if h and (h.Position - BoxPos).Magnitude < 750 then
+                    counts[obj.Name] = (counts[obj.Name] or 0) + 1; firstTool[obj.Name] = obj
+                    if AutoPickup and PickupFilter[obj.Name] then ghostTouch(obj) end
                 end
             end
         end
         for _, v in pairs(TrackerPage:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
-        for name, handle in pairs(firstPart) do
+        for name, toolObj in pairs(firstTool) do
             local b = Instance.new("TextButton", TrackerPage); b.Size = UDim2.new(1, 0, 0, 25); b.Text = " " .. name .. " x" .. counts[name]; b.TextColor3 = Color3.new(1,1,1); b.BackgroundTransparency = 0.9; b.TextXAlignment = Enum.TextXAlignment.Left
-            b.MouseButton1Click:Connect(function() stealthTouch(handle) end)
+            b.MouseButton1Click:Connect(function() ghostTouch(toolObj) end)
         end
     end
 end)
