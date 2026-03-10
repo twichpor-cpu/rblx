@@ -1,6 +1,6 @@
 --[[ 
-    ULTIMATE FARMING HUB (V35 - NO-FLING)
-    Updates: Offset Teleport (+3 Studs), Velocity Reset, Optimized UI.
+    ULTIMATE FARMING HUB (V35 - STABLE SELL)
+    Updates: Single-Item Equip Logic, Anti-Fling TP, Ultra-Fast Scan.
 ]]
 
 local Players = game:GetService("Players")
@@ -58,11 +58,8 @@ local function teleportTo(obj)
     local targetPart = obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart")
     
     if root and targetPart then
-        -- Reset Velocity to prevent momentum buildup (flinging)
         root.AssemblyLinearVelocity = Vector3.new(0,0,0)
         root.AssemblyAngularVelocity = Vector3.new(0,0,0)
-        
-        -- Teleport 3 studs above the object to avoid collision issues
         root.CFrame = targetPart.CFrame * CFrame.new(0, 3, 0)
     end
 end
@@ -156,7 +153,7 @@ local function openFilter(mode, isRefresh)
     end
 end
 
--- Options Tab
+-- Options Toggles
 local PickTgl = Instance.new("TextButton", OptionsPage); PickTgl.Size = UDim2.new(1, -5, 0, 35); PickTgl.BackgroundColor3 = Color3.fromRGB(100, 30, 30); PickTgl.Text = "AUTO-PICKUP: OFF"; PickTgl.TextColor3 = Color3.new(1,1,1); PickTgl.Font = Enum.Font.SourceSansBold
 local PickFilterBtn = Instance.new("TextButton", OptionsPage); PickFilterBtn.Size = UDim2.new(1, -5, 0, 22); PickFilterBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50); PickFilterBtn.Text = "Configure Pickup Filter"; PickFilterBtn.TextColor3 = Color3.new(0.8,0.8,0.8); PickFilterBtn.TextSize = 12
 local SellTgl = Instance.new("TextButton", OptionsPage); SellTgl.Size = UDim2.new(1, -5, 0, 35); SellTgl.BackgroundColor3 = Color3.fromRGB(100, 30, 30); SellTgl.Text = "AUTO-SELL: OFF"; SellTgl.TextColor3 = Color3.new(1,1,1); SellTgl.Font = Enum.Font.SourceSansBold
@@ -195,19 +192,14 @@ task.spawn(function()
             end
         end
 
-        -- Update UI (Responsive)
         for name, btn in pairs(TrackerButtons) do
-            if not currentCounts[name] then
-                btn:Destroy()
-                TrackerButtons[name] = nil
-            end
+            if not currentCounts[name] then btn:Destroy(); TrackerButtons[name] = nil end
         end
         for name, count in pairs(currentCounts) do
-            local toolObj = currentTools[name]
             if not TrackerButtons[name] then
                 local b = Instance.new("TextButton", TrackerPage)
                 b.Size = UDim2.new(1, 0, 0, 25); b.TextColor3 = Color3.new(1,1,1); b.BackgroundTransparency = 0.9; b.TextXAlignment = Enum.TextXAlignment.Left
-                b.MouseButton1Click:Connect(function() ghostTouch(toolObj) end)
+                b.MouseButton1Click:Connect(function() ghostTouch(currentTools[name]) end)
                 TrackerButtons[name] = b
             end
             TrackerButtons[name].Text = "  " .. name .. " x" .. count
@@ -216,18 +208,30 @@ task.spawn(function()
     end
 end)
 
--- SELL LOOP
+-- UPDATED SINGLE-EQUIP SELL LOOP
 task.spawn(function()
     while Running and task.wait(0.1) do
-        if AutoSell then
-            local bp = Player:FindFirstChild("Backpack")
-            if Player.Character and bp then
-                for _, tool in pairs(bp:GetChildren()) do 
-                    if tool:IsA("Tool") and not SellFilter[tool.Name] then tool.Parent = Player.Character end 
+        if AutoSell and Player.Character then
+            local heldTool = Player.Character:FindFirstChildOfClass("Tool")
+            
+            -- If not holding anything, equip ONE valid tool
+            if not heldTool then
+                local bp = Player:FindFirstChild("Backpack")
+                if bp then
+                    for _, tool in pairs(bp:GetChildren()) do 
+                        if tool:IsA("Tool") and not SellFilter[tool.Name] then 
+                            tool.Parent = Player.Character 
+                            break -- ONLY EQUIP ONE
+                        end 
+                    end
                 end
             end
-            local held = Player.Character and Player.Character:FindFirstChildOfClass("Tool")
-            if held and not SellFilter[held.Name] then SellRemote:FireServer() end
+            
+            -- If we are now holding something, sell it
+            local newHeld = Player.Character:FindFirstChildOfClass("Tool")
+            if newHeld and not SellFilter[newHeld.Name] then 
+                SellRemote:FireServer() 
+            end
         end
     end
 end)
