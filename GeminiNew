@@ -1,1 +1,377 @@
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CoreGui = game:GetService("CoreGui")
 
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+
+-- Define item list
+local FilterItems = {
+    "Water", "Arrow", "Rokakaka Fruit", "Frog", "Requiem Arrow", 
+    "Vampire Mask", "DIOS's Diary", "Camera", "Shadow Camera", 
+    "Holy Corpse", "Nostalgic Relic", "Shiny Gem", "Monochromatic Sphere", 
+    "Ender Pearl", "Golden Mask"
+}
+
+-- State variables
+local TrackedItems = {}
+local SellFilters = {}
+local PickupFilters = {}
+local Toggles = {
+    AutoCollectNotes = false,
+    AutoSell = false,
+    AutoPickup = false
+}
+
+for _, item in ipairs(FilterItems) do
+    SellFilters[item] = true -- Default to checked (DO NOT sell)
+    PickupFilters[item] = false -- Default to unchecked (DO NOT pickup)
+end
+
+-- ==========================================
+-- SPATIAL & SAFETY CHECKS
+-- ==========================================
+
+local ZonePos = Vector3.new(5662.36, 720.27, -1317.86)
+local ZoneSize = Vector3.new(867, 89, 783)
+local MinBounds = ZonePos - (ZoneSize / 2)
+local MaxBounds = ZonePos + (ZoneSize / 2)
+
+local function IsInValidZone(pos)
+    -- Check Global Coordinates Box
+    if (pos.X >= MinBounds.X and pos.X <= MaxBounds.X) and
+       (pos.Y >= MinBounds.Y and pos.Y <= MaxBounds.Y) and
+       (pos.Z >= MinBounds.Z and pos.Z <= MaxBounds.Z) then
+        return true
+    end
+
+    -- Check ItemSpawnAreas
+    local spawnAreas = Workspace:FindFirstChild("ItemSpawnAreas")
+    if spawnAreas then
+        for _, area in ipairs(spawnAreas:GetChildren()) do
+            if area:IsA("BasePart") then
+                local half = area.Size / 2
+                local minA = area.Position - half
+                local maxA = area.Position + half
+                if (pos.X >= minA.X and pos.X <= maxA.X) and
+                   (pos.Y >= minA.Y and pos.Y <= maxA.Y) and
+                   (pos.Z >= minA.Z and pos.Z <= maxA.Z) then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
+local function IsSafeItem(itemPart)
+    -- Anti-cheat check: Ensures there are environment blocks near the item
+    local params = OverlapParams.new()
+    params.FilterDescendantsInstances = {itemPart}
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    
+    local partsNear = Workspace:GetPartBoundsInRadius(itemPart.Position, 8, params)
+    local environmentBlocks = 0
+    for _, part in ipairs(partsNear) do
+        if part:IsA("BasePart") and part.CanCollide then
+            environmentBlocks = environmentBlocks + 1
+        end
+    end
+    return environmentBlocks >= 1 -- Valid if at least 1 other physical block is nearby
+end
+
+local function TeleportTo(part, isLower)
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if root and part then
+        local offset = isLower and Vector3.new(0, 3, 0) or Vector3.new(0, 0, 0)
+        root.CFrame = CFrame.new(part.Position - offset)
+    end
+end
+
+-- ==========================================
+-- GUI CONSTRUCTION
+-- ==========================================
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "UtilityHub"
+-- If running in executor, protect GUI by putting in CoreGui
+local success = pcall(function() ScreenGui.Parent = CoreGui end)
+if not success then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0, 400, 0, 300)
+MainFrame.Position = UDim2.new(0.5, -200, 0.5, -150)
+MainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+
+-- Draggable Logic
+local dragToggle, dragStart, startPos
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragToggle = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+    end
+end)
+MainFrame.InputChanged:Connect(function(input)
+    if dragToggle and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+MainFrame.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then dragToggle = false end
+end)
+
+local TopBar = Instance.new("Frame", MainFrame)
+TopBar.Size = UDim2.new(1, 0, 0, 30)
+TopBar.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+TopBar.BorderSizePixel = 0
+
+local Title = Instance.new("TextLabel", TopBar)
+Title.Size = UDim2.new(1, -40, 1, 0)
+Title.BackgroundTransparency = 1
+Title.Text = " Item Utility Hub"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 14
+
+local CloseBtn = Instance.new("TextButton", TopBar)
+CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseBtn.Position = UDim2.new(1, -30, 0, 0)
+CloseBtn.Text = "X"
+CloseBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+CloseBtn.TextColor3 = Color3.new(1,1,1)
+CloseBtn.BorderSizePixel = 0
+CloseBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
+
+local TabContainer = Instance.new("Frame", MainFrame)
+TabContainer.Size = UDim2.new(1, 0, 0, 30)
+TabContainer.Position = UDim2.new(0, 0, 0, 30)
+TabContainer.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+TabContainer.BorderSizePixel = 0
+
+local function CreateTabButton(text, posScale, frameToShow)
+    local btn = Instance.new("TextButton", TabContainer)
+    btn.Size = UDim2.new(0.333, 0, 1, 0)
+    btn.Position = UDim2.new(posScale, 0, 0, 0)
+    btn.Text = text
+    btn.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
+    btn.TextColor3 = Color3.new(1,1,1)
+    btn.MouseButton1Click:Connect(function()
+        for _, child in ipairs(MainFrame:GetChildren()) do
+            if child:IsA("ScrollingFrame") then child.Visible = false end
+        end
+        frameToShow.Visible = true
+    end)
+    return btn
+end
+
+-- TABS
+local ItemTab = Instance.new("ScrollingFrame", MainFrame)
+local SellTab = Instance.new("ScrollingFrame", MainFrame)
+local PickupTab = Instance.new("ScrollingFrame", MainFrame)
+
+for _, tab in ipairs({ItemTab, SellTab, PickupTab}) do
+    tab.Size = UDim2.new(1, 0, 1, -60)
+    tab.Position = UDim2.new(0, 0, 0, 60)
+    tab.BackgroundTransparency = 1
+    tab.ScrollBarThickness = 6
+    tab.Visible = false
+    local layout = Instance.new("UIListLayout", tab)
+    layout.Padding = UDim.new(0, 5)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+end
+ItemTab.Visible = true
+
+CreateTabButton("Items", 0, ItemTab)
+CreateTabButton("Auto Sell", 0.333, SellTab)
+CreateTabButton("Auto Pickup", 0.666, PickupTab)
+
+-- HELPER FUNCTIONS FOR UI
+local function CreateToggle(parent, text, stateTable, stateKey, callback)
+    local frame = Instance.new("Frame", parent)
+    frame.Size = UDim2.new(1, -10, 0, 30)
+    frame.BackgroundTransparency = 1
+    
+    local btn = Instance.new("TextButton", frame)
+    btn.Size = UDim2.new(0, 24, 0, 24)
+    btn.Position = UDim2.new(0, 5, 0, 3)
+    btn.Text = stateTable[stateKey] and "X" or ""
+    btn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    btn.TextColor3 = Color3.new(1,1,1)
+    
+    local lbl = Instance.new("TextLabel", frame)
+    lbl.Size = UDim2.new(1, -40, 1, 0)
+    lbl.Position = UDim2.new(0, 35, 0, 0)
+    lbl.Text = text
+    lbl.TextColor3 = Color3.new(1,1,1)
+    lbl.BackgroundTransparency = 1
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    btn.MouseButton1Click:Connect(function()
+        stateTable[stateKey] = not stateTable[stateKey]
+        btn.Text = stateTable[stateKey] and "X" or ""
+        if callback then callback(stateTable[stateKey]) end
+    end)
+    return frame, btn
+end
+
+-- POPULATE TABS
+CreateToggle(ItemTab, "Collect Notes", Toggles, "AutoCollectNotes")
+
+CreateToggle(SellTab, "Enable Auto Sell", Toggles, "AutoSell")
+local sellLabel = Instance.new("TextLabel", SellTab)
+sellLabel.Size = UDim2.new(1, 0, 0, 20)
+sellLabel.Text = " Check to KEEP (Unchecked will sell)"
+sellLabel.TextColor3 = Color3.new(0.7, 0.7, 0.7)
+sellLabel.BackgroundTransparency = 1
+for _, item in ipairs(FilterItems) do
+    CreateToggle(SellTab, item, SellFilters, item)
+end
+
+CreateToggle(PickupTab, "Enable Auto Pickup", Toggles, "AutoPickup")
+local CheckAllBtn = Instance.new("TextButton", PickupTab)
+CheckAllBtn.Size = UDim2.new(1, -10, 0, 25)
+CheckAllBtn.Text = "Toggle All Pickup Filters"
+CheckAllBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+CheckAllBtn.TextColor3 = Color3.new(1,1,1)
+CheckAllBtn.MouseButton1Click:Connect(function()
+    local targetState = not PickupFilters[FilterItems[1]]
+    for _, item in ipairs(FilterItems) do PickupFilters[item] = targetState end
+    -- Force UI refresh (Lazy rebuild approach for simplicity)
+    for _, child in ipairs(PickupTab:GetChildren()) do
+        if child:IsA("Frame") and child:FindFirstChild("TextButton") then
+            local lbl = child:FindFirstChild("TextLabel")
+            if lbl and PickupFilters[lbl.Text] ~= nil then
+                child.TextButton.Text = PickupFilters[lbl.Text] and "X" or ""
+            end
+        end
+    end
+end)
+for _, item in ipairs(FilterItems) do
+    CreateToggle(PickupTab, item, PickupFilters, item)
+end
+
+-- DYNAMIC ITEM LISTING
+local ItemButtons = {}
+local function UpdateItemListUI()
+    -- Clear current buttons
+    for _, btn in pairs(ItemButtons) do btn:Destroy() end
+    table.clear(ItemButtons)
+
+    for itemName, data in pairs(TrackedItems) do
+        local count = #data
+        if count > 0 then
+            local btn = Instance.new("TextButton", ItemTab)
+            btn.Size = UDim2.new(1, -10, 0, 25)
+            btn.Position = UDim2.new(0, 5, 0, 0)
+            btn.Text = itemName .. " x" .. tostring(count)
+            btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+            btn.TextColor3 = Color3.new(1,1,1)
+            btn.MouseButton1Click:Connect(function()
+                -- TP to the first one in the list
+                local target = TrackedItems[itemName][1]
+                if target and target.Parent then
+                    local isLower = (itemName == "Frog" or itemName == "Banknote")
+                    TeleportTo(target:IsA("Model") and target.PrimaryPart or target, isLower)
+                end
+            end)
+            table.insert(ItemButtons, btn)
+        end
+    end
+    ItemTab.CanvasSize = UDim2.new(0, 0, 0, ItemTab.UIListLayout.AbsoluteContentSize.Y + 10)
+    SellTab.CanvasSize = UDim2.new(0, 0, 0, SellTab.UIListLayout.AbsoluteContentSize.Y + 10)
+    PickupTab.CanvasSize = UDim2.new(0, 0, 0, PickupTab.UIListLayout.AbsoluteContentSize.Y + 10)
+end
+
+-- ==========================================
+-- MAIN LOGIC LOOPS & EVENTS
+-- ==========================================
+
+local function HandleNewItem(inst)
+    if not inst:IsA("Tool") and not inst:IsA("Model") and not inst:IsA("BasePart") then return end
+    
+    local pos = inst:IsA("Model") and (inst.PrimaryPart and inst.PrimaryPart.Position) or inst.Position
+    if not pos then return end
+
+    if IsInValidZone(pos) and IsSafeItem(inst) then
+        local name = inst.Name
+        if not TrackedItems[name] then TrackedItems[name] = {} end
+        table.insert(TrackedItems[name], inst)
+        UpdateItemListUI()
+
+        -- Cleanup when picked up/despawned
+        inst.AncestryChanged:Connect(function(_, newParent)
+            if newParent ~= Workspace and newParent ~= Workspace:FindFirstChild("ItemSpawnAreas") then
+                local idx = table.find(TrackedItems[name], inst)
+                if idx then 
+                    table.remove(TrackedItems[name], idx) 
+                    UpdateItemListUI()
+                end
+            end
+        end)
+    end
+end
+
+Workspace.DescendantAdded:Connect(HandleNewItem)
+
+-- Initial scan
+for _, v in ipairs(Workspace:GetDescendants()) do
+    HandleNewItem(v)
+end
+
+-- Logic Loop
+RunService.Heartbeat:Connect(function()
+    -- 1. Auto Collect Notes
+    if Toggles.AutoCollectNotes then
+        local note = Workspace:FindFirstChild("Banknote")
+        if note then TeleportTo(note, true) end
+    end
+
+    -- 2. Auto Sell
+    if Toggles.AutoSell then
+        local backpack = LocalPlayer:FindFirstChild("Backpack")
+        local charTools = Character:GetChildren()
+        
+        local allTools = backpack and backpack:GetChildren() or {}
+        for _, t in ipairs(charTools) do table.insert(allTools, t) end
+
+        for _, tool in ipairs(allTools) do
+            if tool:IsA("Tool") and SellFilters[tool.Name] == false then
+                -- Equip and sell
+                local hum = Character:FindFirstChild("Humanoid")
+                if hum then
+                    hum:EquipTool(tool)
+                    task.wait(0.1) -- Small delay to ensure equip registers
+                    local remote = ReplicatedStorage:FindFirstChild("BismalqStuff")
+                    if remote then
+                        remote:WaitForChild("Remotes"):WaitForChild("Sell"):FireServer()
+                    end
+                end
+            end
+        end
+    end
+
+    -- 3. Auto Pickup
+    if Toggles.AutoPickup then
+        for name, state in pairs(PickupFilters) do
+            if state and TrackedItems[name] and #TrackedItems[name] > 0 then
+                local target = TrackedItems[name][1]
+                if target and target.Parent then
+                    local isLower = (name == "Frog" or name == "Banknote")
+                    TeleportTo(target:IsA("Model") and target.PrimaryPart or target, isLower)
+                    task.wait(0.5) -- Prevent teleport spam
+                end
+            end
+        end
+    end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function(newChar)
+    Character = newChar
+end)
