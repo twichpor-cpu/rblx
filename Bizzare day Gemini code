@@ -1,6 +1,6 @@
 --[[ 
-    ULTIMATE FARMING HUB (V35 - LIGHT)
-    Updates: Removed NPC Farm & Hover Distance. Focused on Item Management.
+    ULTIMATE FARMING HUB (V35 - NO-FLING)
+    Updates: Offset Teleport (+3 Studs), Velocity Reset, Optimized UI.
 ]]
 
 local Players = game:GetService("Players")
@@ -11,7 +11,7 @@ local Player = Players.LocalPlayer
 
 -- Global Script State
 local Running = true 
-local BoxPos = Vector3.new(5662.36, 720.27, -1317.86)
+local SAFE_DISTANCE = 18 
 
 -- Configuration States
 local CollectNotes = false
@@ -21,6 +21,7 @@ local CurrentFilterMode = nil
 
 local SellFilter = {}   
 local PickupFilter = {} 
+local TrackerButtons = {} 
 
 local defaultItems = {
     "Water", "Arrow", "Rokakaka Fruit", "Frog", "Requiem Arrow", "Vampire Mask", 
@@ -40,15 +41,29 @@ local SellRemote = ReplicatedStorage:WaitForChild("BismalqStuff"):WaitForChild("
 
 -- Helper: GHOST TOUCH
 local function ghostTouch(tool)
-    if not Running then return end
+    if not Running or not tool.Parent then return end
     local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
     local handle = tool:FindFirstChild("Handle") or tool:FindFirstChildWhichIsA("BasePart")
-    if root and handle and tool.Parent == workspace then
-        if firetouchinterest then
-            firetouchinterest(root, handle, 0)
-            task.wait()
-            firetouchinterest(root, handle, 1)
-        end
+    if root and handle then
+        firetouchinterest(root, handle, 0)
+        task.wait()
+        firetouchinterest(root, handle, 1)
+    end
+end
+
+-- Helper: SAFE FORWARD TELEPORT (Anti-Fling)
+local function teleportTo(obj)
+    if not Running or not obj.Parent then return end
+    local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+    local targetPart = obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart")
+    
+    if root and targetPart then
+        -- Reset Velocity to prevent momentum buildup (flinging)
+        root.AssemblyLinearVelocity = Vector3.new(0,0,0)
+        root.AssemblyAngularVelocity = Vector3.new(0,0,0)
+        
+        -- Teleport 3 studs above the object to avoid collision issues
+        root.CFrame = targetPart.CFrame * CFrame.new(0, 3, 0)
     end
 end
 
@@ -141,21 +156,13 @@ local function openFilter(mode, isRefresh)
     end
 end
 
--- Options Tab UI Elements
-local function createMainOpt(txt, color)
-    local b = Instance.new("TextButton", OptionsPage); b.Size = UDim2.new(1, -5, 0, 35); b.BackgroundColor3 = color; b.Text = txt; b.TextColor3 = Color3.new(1,1,1); b.Font = Enum.Font.SourceSansBold; return b
-end
-local function createSubBtn(txt)
-    local b = Instance.new("TextButton", OptionsPage); b.Size = UDim2.new(1, -5, 0, 22); b.BackgroundColor3 = Color3.fromRGB(50, 50, 50); b.Text = txt; b.TextColor3 = Color3.new(0.8,0.8,0.8); b.TextSize = 12; return b
-end
+-- Options Tab
+local PickTgl = Instance.new("TextButton", OptionsPage); PickTgl.Size = UDim2.new(1, -5, 0, 35); PickTgl.BackgroundColor3 = Color3.fromRGB(100, 30, 30); PickTgl.Text = "AUTO-PICKUP: OFF"; PickTgl.TextColor3 = Color3.new(1,1,1); PickTgl.Font = Enum.Font.SourceSansBold
+local PickFilterBtn = Instance.new("TextButton", OptionsPage); PickFilterBtn.Size = UDim2.new(1, -5, 0, 22); PickFilterBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50); PickFilterBtn.Text = "Configure Pickup Filter"; PickFilterBtn.TextColor3 = Color3.new(0.8,0.8,0.8); PickFilterBtn.TextSize = 12
+local SellTgl = Instance.new("TextButton", OptionsPage); SellTgl.Size = UDim2.new(1, -5, 0, 35); SellTgl.BackgroundColor3 = Color3.fromRGB(100, 30, 30); SellTgl.Text = "AUTO-SELL: OFF"; SellTgl.TextColor3 = Color3.new(1,1,1); SellTgl.Font = Enum.Font.SourceSansBold
+local SellFilterBtn = Instance.new("TextButton", OptionsPage); SellFilterBtn.Size = UDim2.new(1, -5, 0, 22); SellFilterBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50); SellFilterBtn.Text = "Configure Sell Filter"; SellFilterBtn.TextColor3 = Color3.new(0.8,0.8,0.8); SellFilterBtn.TextSize = 12
+local NoteTgl = Instance.new("TextButton", OptionsPage); NoteTgl.Size = UDim2.new(1, -5, 0, 35); NoteTgl.BackgroundColor3 = Color3.fromRGB(100, 30, 30); NoteTgl.Text = "COLLECT NOTES: OFF"; NoteTgl.TextColor3 = Color3.new(1,1,1); NoteTgl.Font = Enum.Font.SourceSansBold
 
-local PickTgl = createMainOpt("AUTO-PICKUP: OFF", Color3.fromRGB(100, 30, 30))
-local PickFilterBtn = createSubBtn("Configure Pickup Filter")
-local SellTgl = createMainOpt("AUTO-SELL: OFF", Color3.fromRGB(100, 30, 30))
-local SellFilterBtn = createSubBtn("Configure Sell Filter")
-local NoteTgl = createMainOpt("COLLECT NOTES: OFF", Color3.fromRGB(100, 30, 30))
-
--- Interaction Connects
 PickTgl.MouseButton1Click:Connect(function() AutoPickup = not AutoPickup; PickTgl.Text = "AUTO-PICKUP: " .. (AutoPickup and "ON" or "OFF"); PickTgl.BackgroundColor3 = AutoPickup and Color3.fromRGB(30, 100, 30) or Color3.fromRGB(100, 30, 30) end)
 SellTgl.MouseButton1Click:Connect(function() AutoSell = not AutoSell; SellTgl.Text = "AUTO-SELL: " .. (AutoSell and "ON" or "OFF"); SellTgl.BackgroundColor3 = AutoSell and Color3.fromRGB(30, 100, 30) or Color3.fromRGB(100, 30, 30) end)
 NoteTgl.MouseButton1Click:Connect(function() CollectNotes = not CollectNotes; NoteTgl.Text = "COLLECT NOTES: " .. (CollectNotes and "ON" or "OFF"); NoteTgl.BackgroundColor3 = CollectNotes and Color3.fromRGB(30, 100, 30) or Color3.fromRGB(100, 30, 30) end)
@@ -165,37 +172,59 @@ SellFilterBtn.MouseButton1Click:Connect(function() openFilter("SELL", false) end
 TrackerTabBtn.MouseButton1Click:Connect(function() TrackerPage.Visible = true; OptionsPage.Visible = false; FilterFrame.Visible = false end)
 OptionsTabBtn.MouseButton1Click:Connect(function() TrackerPage.Visible = false; OptionsPage.Visible = true; FilterFrame.Visible = false end)
 
--- LOOPS
+-- MAIN STABLE LOOP
 task.spawn(function()
-    while Running and task.wait(0.4) do
-        if CollectNotes then
-            for _, item in pairs(workspace:GetChildren()) do
-                if item.Name == "Banknote" or item.Name == "troll banknote" then ghostTouch(item) end
-            end
-        end
-        local counts, firstTool = {}, {}
+    while Running do
+        local trapPart = workspace:FindFirstChild("Part")
+        local currentCounts = {}
+        local currentTools = {}
+        
         for _, obj in pairs(workspace:GetChildren()) do
-            if obj:IsA("Tool") and not Players:GetPlayerFromCharacter(obj.Parent) then
-                local h = obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart")
-                if h and (h.Position - BoxPos).Magnitude < 750 then
-                    counts[obj.Name] = (counts[obj.Name] or 0) + 1; firstTool[obj.Name] = obj
-                    if AutoPickup and PickupFilter[obj.Name] then ghostTouch(obj) end
+            local h = obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart")
+            if h then
+                local isSafe = not (trapPart and (h.Position - trapPart.Position).Magnitude < SAFE_DISTANCE)
+                if isSafe then
+                    if CollectNotes and (obj.Name == "Banknote" or obj.Name == "troll banknote") then
+                        teleportTo(obj)
+                    elseif obj:IsA("Tool") and not Players:GetPlayerFromCharacter(obj.Parent) then
+                        currentCounts[obj.Name] = (currentCounts[obj.Name] or 0) + 1
+                        currentTools[obj.Name] = obj
+                        if AutoPickup and PickupFilter[obj.Name] then ghostTouch(obj) end
+                    end
                 end
             end
         end
-        for _, v in pairs(TrackerPage:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
-        for name, toolObj in pairs(firstTool) do
-            local b = Instance.new("TextButton", TrackerPage); b.Size = UDim2.new(1, 0, 0, 25); b.Text = " " .. name .. " x" .. counts[name]; b.TextColor3 = Color3.new(1,1,1); b.BackgroundTransparency = 0.9; b.TextXAlignment = Enum.TextXAlignment.Left; b.MouseButton1Click:Connect(function() ghostTouch(toolObj) end)
+
+        -- Update UI (Responsive)
+        for name, btn in pairs(TrackerButtons) do
+            if not currentCounts[name] then
+                btn:Destroy()
+                TrackerButtons[name] = nil
+            end
         end
+        for name, count in pairs(currentCounts) do
+            local toolObj = currentTools[name]
+            if not TrackerButtons[name] then
+                local b = Instance.new("TextButton", TrackerPage)
+                b.Size = UDim2.new(1, 0, 0, 25); b.TextColor3 = Color3.new(1,1,1); b.BackgroundTransparency = 0.9; b.TextXAlignment = Enum.TextXAlignment.Left
+                b.MouseButton1Click:Connect(function() ghostTouch(toolObj) end)
+                TrackerButtons[name] = b
+            end
+            TrackerButtons[name].Text = "  " .. name .. " x" .. count
+        end
+        task.wait(0.05)
     end
 end)
 
+-- SELL LOOP
 task.spawn(function()
     while Running and task.wait(0.1) do
         if AutoSell then
             local bp = Player:FindFirstChild("Backpack")
             if Player.Character and bp then
-                for _, tool in pairs(bp:GetChildren()) do if tool:IsA("Tool") and not SellFilter[tool.Name] then tool.Parent = Player.Character end end
+                for _, tool in pairs(bp:GetChildren()) do 
+                    if tool:IsA("Tool") and not SellFilter[tool.Name] then tool.Parent = Player.Character end 
+                end
             end
             local held = Player.Character and Player.Character:FindFirstChildOfClass("Tool")
             if held and not SellFilter[held.Name] then SellRemote:FireServer() end
