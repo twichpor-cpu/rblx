@@ -1,6 +1,6 @@
 --[[ 
-    ULTIMATE FARMING HUB (V37 - FULL INTEGRATION)
-    Updates: Model Support (Banknotes), Dual-Zone Scan, 10-Stud Safety, Unified Logic.
+    ULTIMATE FARMING HUB (V37 - FULL INTEGRATION - MERGED)
+    Updates: Floating Branding, Model Support, Dual-Zone Scan, 10-Stud Safety.
 ]]
 
 local Players = game:GetService("Players")
@@ -76,11 +76,22 @@ end
 
 -- GUI Setup
 local ScreenGui = Instance.new("ScreenGui", Player.PlayerGui)
-ScreenGui.Name = "FarmHub_V37_Final"; ScreenGui.ResetOnSpawn = false
+ScreenGui.Name = "FarmHub_Merged_V37"; ScreenGui.ResetOnSpawn = false
 
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 240, 0, 320); MainFrame.Position = UDim2.new(0.1, 0, 0.3, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15); MainFrame.Active = true; MainFrame.BorderSizePixel = 0
+
+-- Floating Version Label (The "Merged" branding)
+local VersionLabel = Instance.new("TextLabel", MainFrame)
+VersionLabel.Size = UDim2.new(1, 0, 0, 20)
+VersionLabel.Position = UDim2.new(0, 0, 1, 2) -- Positioned just below the frame
+VersionLabel.BackgroundTransparency = 1
+VersionLabel.Text = "ULTIMATE FARMING HUB - V37 FINAL"
+VersionLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+VersionLabel.TextSize = 10
+VersionLabel.Font = Enum.Font.Code
+VersionLabel.TextXAlignment = Enum.TextXAlignment.Right
 
 -- DRAGGING
 local dragToggle, dragStart, startPos
@@ -189,9 +200,8 @@ task.spawn(function()
         local function scanContainer(container, useSafety)
             if not container then return end
             for _, obj in pairs(container:GetChildren()) do
-                -- Check if object is a valid Tool or a Model
                 if obj:IsA("Tool") or obj:IsA("Model") then
-                    if Players:GetPlayerFromCharacter(obj) then continue end -- Skip Players
+                    if Players:GetPlayerFromCharacter(obj) then continue end 
                     
                     local h = getTargetPart(obj)
                     if h then
@@ -202,13 +212,10 @@ task.spawn(function()
 
                         if isSafe then
                             local name = obj.Name
-                            -- Specific Handling for Banknotes (Teleport)
                             if CollectNotes and (name == "Banknote" or name == "troll banknote") then
                                 teleportTo(obj)
                                 currentCounts[name] = (currentCounts[name] or 0) + 1
                                 currentTools[name] = obj
-                            
-                            -- Regular Pickup (Ghost Touch)
                             elseif PickupFilter[name] then
                                 currentCounts[name] = (currentCounts[name] or 0) + 1
                                 currentTools[name] = obj
@@ -220,10 +227,9 @@ task.spawn(function()
             end
         end
 
-        scanContainer(workspace:FindFirstChild("Items"), false) -- Safe Zone
-        scanContainer(workspace, true) -- Safety Zone
+        scanContainer(workspace:FindFirstChild("Items"), false) 
+        scanContainer(workspace, true)
 
-        -- Update UI
         for name, btn in pairs(TrackerButtons) do
             if not currentCounts[name] then btn:Destroy(); TrackerButtons[name] = nil end
         end
