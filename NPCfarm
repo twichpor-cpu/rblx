@@ -1,183 +1,193 @@
--- [[ MEGA NPC FARMER - UNDERNEATH + AUTO-ABILITY ]] --
-local player = game.Players.LocalPlayer
-local runService = game:GetService("RunService")
-local vim = game:GetService("VirtualInputManager")
+--[[ 
+    ULTIMATE NPC FARMER (V5 - LOOT & RETURN UPDATE)
+    Updates: Home Position Memory, Loot-Stay Logic, Auto-Collision Restoration.
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local VIM = game:GetService("VirtualInputManager")
+local Player = Players.LocalPlayer
+
+-- Global Script State
+local Running = true
+local Farming = false
+local FarmDistance = 5
+local HomePosition = nil
+local LastBossPosition = nil
+local SelectedNPCs = {}
+local ActiveAbilities = {}
 
 -- Configuration
-local farming = false
-local farmDistance = 5
-local selectedTargets = {}
-local activeAbilities = {}
-local targetList = {"DIO", "Funny Valentine", "Dio Brando", "Vampire Minion"} 
-local keys = {"E", "R", "T", "Y", "F", "G", "H", "J", "B"}
+local TargetList = {"DIO", "Funny Valentine", "Dio Brando", "Vampire Minion"}
+local AbilityKeys = {"E", "R", "T", "Y", "F", "G", "H", "J", "B"}
 
--- UI Setup
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "UnderFarmUltra"
-ScreenGui.Parent = game.CoreGui
+for _, npc in pairs(TargetList) do SelectedNPCs[npc] = false end
+for _, key in pairs(AbilityKeys) do ActiveAbilities[key] = false end
 
-local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 200, 0, 220)
-MainFrame.Position = UDim2.new(0.5, -100, 0.5, -110)
-MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-MainFrame.Active = true
-MainFrame.Draggable = true
-MainFrame.Parent = ScreenGui
+-- GUI Setup
+local ScreenGui = Instance.new("ScreenGui", Player.PlayerGui)
+ScreenGui.Name = "NpcFarmHub_V5"; ScreenGui.ResetOnSpawn = false
 
-local FarmToggle = Instance.new("TextButton")
-FarmToggle.Size = UDim2.new(0.8, 0, 0, 30)
-FarmToggle.Position = UDim2.new(0.1, 0, 0.15, 0)
-FarmToggle.Text = "FARM: OFF"
-FarmToggle.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
-FarmToggle.TextColor3 = Color3.new(1,1,1)
-FarmToggle.Parent = MainFrame
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0, 240, 0, 320); MainFrame.Position = UDim2.new(0.1, 0, 0.3, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15); MainFrame.Active = true; MainFrame.BorderSizePixel = 0
 
-local FilterBtn = Instance.new("TextButton")
-FilterBtn.Size = UDim2.new(0.8, 0, 0, 30)
-FilterBtn.Position = UDim2.new(0.1, 0, 0.35, 0)
-FilterBtn.Text = "NPC FILTER >"
-FilterBtn.Parent = MainFrame
-
-local AbilityBtn = Instance.new("TextButton")
-AbilityBtn.Size = UDim2.new(0.8, 0, 0, 30)
-AbilityBtn.Position = UDim2.new(0.1, 0, 0.55, 0)
-AbilityBtn.Text = "ABILITIES >"
-AbilityBtn.Parent = MainFrame
-
-local DistInput = Instance.new("TextBox")
-DistInput.Size = UDim2.new(0.8, 0, 0, 30)
-DistInput.Position = UDim2.new(0.1, 0, 0.75, 0)
-DistInput.Text = "5"
-DistInput.PlaceholderText = "Height"
-DistInput.Parent = MainFrame
-
--- Side Panels
-local function createSidePanel(name, posOffset)
-    local p = Instance.new("Frame")
-    p.Name = name
-    p.Size = UDim2.new(0, 120, 1.2, 0)
-    p.Position = UDim2.new(1, posOffset, 0, 0)
-    p.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    p.Visible = false
-    p.Parent = MainFrame
-    Instance.new("UIListLayout", p)
-    return p
-end
-
-local FilterPanel = createSidePanel("FilterPanel", 5)
-local AbilityPanel = createSidePanel("AbilityPanel", 130)
-
--- Populate Filters
-for _, name in pairs(targetList) do
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.new(1, 0, 0, 25)
-    b.Text = name
-    b.Parent = FilterPanel
-    b.MouseButton1Click:Connect(function()
-        if table.find(selectedTargets, name) then
-            table.remove(selectedTargets, table.find(selectedTargets, name))
-            b.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-        else
-            table.insert(selectedTargets, name)
-            b.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
-        end
-    end)
-end
-
--- Populate Abilities
-for _, key in pairs(keys) do
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.new(1, 0, 0, 22)
-    b.Text = "Auto " .. key
-    b.Parent = AbilityPanel
-    b.MouseButton1Click:Connect(function()
-        if activeAbilities[key] then
-            activeAbilities[key] = false
-            b.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-        else
-            activeAbilities[key] = true
-            b.BackgroundColor3 = Color3.fromRGB(150, 100, 0)
-        end
-    end)
-end
-
--- UI Toggles
-FilterBtn.MouseButton1Click:Connect(function() FilterPanel.Visible = not FilterPanel.Visible end)
-AbilityBtn.MouseButton1Click:Connect(function() AbilityPanel.Visible = not AbilityPanel.Visible end)
-DistInput.FocusLost:Connect(function() farmDistance = tonumber(DistInput.Text) or 5 end)
-FarmToggle.MouseButton1Click:Connect(function()
-    farming = not farming
-    FarmToggle.Text = farming and "FARM: ON" or "FARM: OFF"
-    FarmToggle.BackgroundColor3 = farming and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(150, 50, 50)
+-- DRAGGING
+local dragToggle, dragStart, startPos
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragToggle = true; dragStart = input.Position; startPos = MainFrame.Position
+    end
+end)
+MainFrame.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then dragToggle = false end end)
+RunService.RenderStepped:Connect(function()
+    if Running and dragToggle then
+        local delta = UserInputService:GetMouseLocation() - Vector2.new(dragStart.X, dragStart.Y)
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y - 36)
+    end
 end)
 
---- ATTACK LOGIC ---
-local function useAbility(key)
-    local enumKey = Enum.KeyCode[key]
-    if key == "E" then
-        -- Hold Logic for E
-        vim:SendKeyEvent(true, enumKey, false, game)
-        task.wait(2) -- Adjust this for how long you want to hold E
-        vim:SendKeyEvent(false, enumKey, false, game)
-    else
-        -- Tap Logic for others
-        vim:SendKeyEvent(true, enumKey, false, game)
-        task.wait(0.1)
-        vim:SendKeyEvent(false, enumKey, false, game)
+-- Header
+local Title = Instance.new("TextLabel", MainFrame)
+Title.Size = UDim2.new(1, -35, 0, 30); Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35); Title.Text = "  NPC HUB V5"; Title.TextColor3 = Color3.new(1,1,1); Title.TextXAlignment = Enum.TextXAlignment.Left; Title.Font = Enum.Font.Code; Title.TextSize = 14
+
+local CloseBtn = Instance.new("TextButton", MainFrame)
+CloseBtn.Size = UDim2.new(0, 30, 0, 30); CloseBtn.Position = UDim2.new(1, -30, 0, 0)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(200, 40, 40); CloseBtn.Text = "X"; CloseBtn.TextColor3 = Color3.new(1,1,1); CloseBtn.Font = Enum.Font.Code
+CloseBtn.MouseButton1Click:Connect(function() Running = false; ScreenGui:Destroy() end)
+
+-- Side Panel
+local SidePanel = Instance.new("Frame", MainFrame)
+SidePanel.Size = UDim2.new(0, 180, 1, 0); SidePanel.Position = UDim2.new(1, 5, 0, 0); SidePanel.BackgroundColor3 = Color3.fromRGB(20, 20, 20); SidePanel.Visible = false; SidePanel.BorderSizePixel = 0
+
+local SideHeader = Instance.new("Frame", SidePanel)
+SideHeader.Size = UDim2.new(1, 0, 0, 30); SideHeader.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+
+local SideTitle = Instance.new("TextLabel", SideHeader)
+SideTitle.Size = UDim2.new(1, -30, 1, 0); SideTitle.BackgroundTransparency = 1; SideTitle.Text = "CONFIG"; SideTitle.TextColor3 = Color3.new(1,1,1); SideTitle.Font = Enum.Font.Code; SideTitle.TextSize = 14
+
+local SideClose = Instance.new("TextButton", SideHeader)
+SideClose.Size = UDim2.new(0, 30, 0, 30); SideClose.Position = UDim2.new(1, -30, 0, 0); SideClose.BackgroundColor3 = Color3.fromRGB(60, 60, 60); SideClose.Text = "<"; SideClose.TextColor3 = Color3.new(1,1,1); SideClose.Font = Enum.Font.Code
+SideClose.MouseButton1Click:Connect(function() SidePanel.Visible = false end)
+
+local SideScroll = Instance.new("ScrollingFrame", SidePanel)
+SideScroll.Size = UDim2.new(1, -4, 1, -35); SideScroll.Position = UDim2.new(0,2,0,35); SideScroll.BackgroundTransparency = 1; SideScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y; SideScroll.ScrollBarThickness = 3
+Instance.new("UIListLayout", SideScroll).Padding = UDim.new(0, 2)
+
+-- Main Page
+local MainPage = Instance.new("ScrollingFrame", MainFrame)
+MainPage.Size = UDim2.new(1, -10, 1, -45); MainPage.Position = UDim2.new(0, 5, 0, 40); MainPage.BackgroundTransparency = 1; MainPage.AutomaticCanvasSize = Enum.AutomaticSize.Y; MainPage.ScrollBarThickness = 2
+local MainLayout = Instance.new("UIListLayout", MainPage); MainLayout.Padding = UDim.new(0, 8)
+
+local function createMenuBtn(txt, color)
+    local b = Instance.new("TextButton", MainPage); b.Size = UDim2.new(1, 0, 0, 40); b.BackgroundColor3 = color; b.Text = txt; b.TextColor3 = Color3.new(1,1,1); b.Font = Enum.Font.Code; b.TextSize = 15; b.BorderSizePixel = 0
+    return b
+end
+
+local FarmTgl = createMenuBtn("NPC FARM: OFF", Color3.fromRGB(120, 30, 30))
+local FilterOpenBtn = createMenuBtn("NPC FILTER >", Color3.fromRGB(50, 50, 50))
+local AbilityOpenBtn = createMenuBtn("ABILITY SETUP >", Color3.fromRGB(50, 50, 50))
+
+local function openSide(mode)
+    SidePanel.Visible = true
+    for _, v in pairs(SideScroll:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
+    if mode == "NPC" then
+        SideTitle.Text = "NPC SELECTION"
+        for _, name in pairs(TargetList) do
+            local b = Instance.new("TextButton", SideScroll); b.Size = UDim2.new(1, 0, 0, 32); b.Font = Enum.Font.Code; b.TextSize = 13; b.TextColor3 = Color3.new(1,1,1); b.BorderSizePixel = 0
+            local function update() b.BackgroundColor3 = SelectedNPCs[name] and Color3.fromRGB(40, 120, 40) or Color3.fromRGB(80, 30, 30); b.Text = name .. (SelectedNPCs[name] and " [ACTIVE]" or " [OFF]") end
+            b.MouseButton1Click:Connect(function() SelectedNPCs[name] = not SelectedNPCs[name]; update() end); update()
+        end
+    elseif mode == "ABILITY" then
+        SideTitle.Text = "ABILITY CONFIG"
+        for _, key in pairs(AbilityKeys) do
+            local b = Instance.new("TextButton", SideScroll); b.Size = UDim2.new(1, 0, 0, 32); b.Font = Enum.Font.Code; b.TextSize = 13; b.TextColor3 = Color3.new(1,1,1); b.BorderSizePixel = 0
+            local function update() b.BackgroundColor3 = ActiveAbilities[key] and Color3.fromRGB(150, 100, 20) or Color3.fromRGB(45, 45, 45); b.Text = "Key: " .. key .. (ActiveAbilities[key] and " [ON]" or " [OFF]") end
+            b.MouseButton1Click:Connect(function() ActiveAbilities[key] = not ActiveAbilities[key]; update() end); update()
+        end
     end
 end
 
--- Ability Loop
+-- Farm Toggle Logic (Home Reset)
+FarmTgl.MouseButton1Click:Connect(function()
+    Farming = not Farming
+    local char = Player.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    
+    if Farming then
+        if root then HomePosition = root.CFrame end -- Remember where we started
+        FarmTgl.Text = "NPC FARM: ON"; FarmTgl.BackgroundColor3 = Color3.fromRGB(40, 120, 40)
+    else
+        FarmTgl.Text = "NPC FARM: OFF"; FarmTgl.BackgroundColor3 = Color3.fromRGB(120, 30, 30)
+        -- Restore collision and return home
+        if char then for _, p in pairs(char:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide = true end end end
+        if root and HomePosition then root.CFrame = HomePosition end
+    end
+end)
+
+FilterOpenBtn.MouseButton1Click:Connect(function() openSide("NPC") end)
+AbilityOpenBtn.MouseButton1Click:Connect(function() openSide("ABILITY") end)
+
+-- ATTACK LOOP
 task.spawn(function()
-    while true do
-        if farming then
-            local backpack = player:FindFirstChild("Backpack")
-            local isStandless = backpack and backpack:FindFirstChild("Standless")
-            
-            if not isStandless then
-                for key, active in pairs(activeAbilities) do
+    while Running do
+        if Farming then
+            local bp = Player:FindFirstChild("Backpack")
+            if bp and not bp:FindFirstChild("Standless") then
+                for key, active in pairs(ActiveAbilities) do
                     if active then
-                        useAbility(key)
-                        task.wait(0.5) -- Delay between different skills
+                        local keyCode = Enum.KeyCode[key]
+                        if key == "E" then VIM:SendKeyEvent(true, keyCode, false, game); task.wait(1.5); VIM:SendKeyEvent(false, keyCode, false, game)
+                        else VIM:SendKeyEvent(true, keyCode, false, game); task.wait(0.1); VIM:SendKeyEvent(false, keyCode, false, game) end
+                        task.wait(0.4)
                     end
                 end
             end
         end
-        task.wait(1)
+        task.wait(0.5)
     end
 end)
 
---- POSITIONING LOGIC (Underneath) ---
-runService.Heartbeat:Connect(function()
-    if not farming or not player.Character then return end
-    local root = player.Character:FindFirstChild("HumanoidRootPart")
-    local entities = workspace:FindFirstChild("Entities") 
+-- MOVEMENT LOOP (Collision Management & TP)
+RunService.Heartbeat:Connect(function()
+    if not Running or not Farming or not Player.Character then return end
+    local root = Player.Character:FindFirstChild("HumanoidRootPart")
+    local entities = workspace:FindFirstChild("Entities")
     if not root or not entities then return end
 
+    local targetFound = false
+
     for _, npc in pairs(entities:GetChildren()) do
-        if npc.Name == player.Name then continue end
-        
-        local isTarget = false
-        for _, t in pairs(selectedTargets) do
-            if string.find(npc.Name, t) then isTarget = true break end
-        end
-
-        if isTarget then
+        if npc.Name ~= Player.Name and SelectedNPCs[npc.Name] then
             local dead = npc:FindFirstChild("Dead")
-            local targetPart = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Torso")
+            local npcRoot = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Torso")
             
-            if targetPart and dead and dead.Value == false then
-                -- Noclip
-                for _, p in pairs(player.Character:GetDescendants()) do
-                    if p:IsA("BasePart") then p.CanCollide = false end
-                end
-
-                -- Underneath Position + Face Up
-                local goalPos = targetPart.Position - Vector3.new(0, farmDistance, 0)
-                root.CFrame = CFrame.new(goalPos) * CFrame.Angles(math.rad(90), 0, 0)
-                root.AssemblyLinearVelocity = Vector3.new(0,0,0) 
-                break 
+            if npcRoot and dead and dead.Value == false then
+                targetFound = true
+                LastBossPosition = npcRoot.CFrame -- Store where boss is alive
+                
+                -- Noclip while farming
+                for _, p in pairs(Player.Character:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide = false end end
+                
+                -- Underneath Lock
+                root.CFrame = CFrame.new(npcRoot.Position - Vector3.new(0, FarmDistance, 0)) * CFrame.Angles(math.rad(90), 0, 0)
+                root.AssemblyLinearVelocity = Vector3.new(0,0,0)
+                break
             end
+        end
+    end
+
+    -- IF NO NPC IS ALIVE: Let the player move on the surface to pick up items
+    if not targetFound then
+        for _, p in pairs(Player.Character:GetDescendants()) do 
+            if p:IsA("BasePart") then p.CanCollide = true end -- Restore collision
+        end
+        
+        -- If we just killed a boss, pop up to where they died to grab loot
+        if LastBossPosition then
+            root.CFrame = CFrame.new(LastBossPosition.Position + Vector3.new(0, 3, 0))
+            LastBossPosition = nil -- Reset so we don't keep Tping to thin air
         end
     end
 end)
