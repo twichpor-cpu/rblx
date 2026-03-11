@@ -1,0 +1,183 @@
+-- [[ MEGA NPC FARMER - UNDERNEATH + AUTO-ABILITY ]] --
+local player = game.Players.LocalPlayer
+local runService = game:GetService("RunService")
+local vim = game:GetService("VirtualInputManager")
+
+-- Configuration
+local farming = false
+local farmDistance = 5
+local selectedTargets = {}
+local activeAbilities = {}
+local targetList = {"DIO", "Funny Valentine", "Dio Brando", "Vampire Minion"} 
+local keys = {"E", "R", "T", "Y", "F", "G", "H", "J", "B"}
+
+-- UI Setup
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "UnderFarmUltra"
+ScreenGui.Parent = game.CoreGui
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 200, 0, 220)
+MainFrame.Position = UDim2.new(0.5, -100, 0.5, -110)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local FarmToggle = Instance.new("TextButton")
+FarmToggle.Size = UDim2.new(0.8, 0, 0, 30)
+FarmToggle.Position = UDim2.new(0.1, 0, 0.15, 0)
+FarmToggle.Text = "FARM: OFF"
+FarmToggle.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+FarmToggle.TextColor3 = Color3.new(1,1,1)
+FarmToggle.Parent = MainFrame
+
+local FilterBtn = Instance.new("TextButton")
+FilterBtn.Size = UDim2.new(0.8, 0, 0, 30)
+FilterBtn.Position = UDim2.new(0.1, 0, 0.35, 0)
+FilterBtn.Text = "NPC FILTER >"
+FilterBtn.Parent = MainFrame
+
+local AbilityBtn = Instance.new("TextButton")
+AbilityBtn.Size = UDim2.new(0.8, 0, 0, 30)
+AbilityBtn.Position = UDim2.new(0.1, 0, 0.55, 0)
+AbilityBtn.Text = "ABILITIES >"
+AbilityBtn.Parent = MainFrame
+
+local DistInput = Instance.new("TextBox")
+DistInput.Size = UDim2.new(0.8, 0, 0, 30)
+DistInput.Position = UDim2.new(0.1, 0, 0.75, 0)
+DistInput.Text = "5"
+DistInput.PlaceholderText = "Height"
+DistInput.Parent = MainFrame
+
+-- Side Panels
+local function createSidePanel(name, posOffset)
+    local p = Instance.new("Frame")
+    p.Name = name
+    p.Size = UDim2.new(0, 120, 1.2, 0)
+    p.Position = UDim2.new(1, posOffset, 0, 0)
+    p.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    p.Visible = false
+    p.Parent = MainFrame
+    Instance.new("UIListLayout", p)
+    return p
+end
+
+local FilterPanel = createSidePanel("FilterPanel", 5)
+local AbilityPanel = createSidePanel("AbilityPanel", 130)
+
+-- Populate Filters
+for _, name in pairs(targetList) do
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, 0, 0, 25)
+    b.Text = name
+    b.Parent = FilterPanel
+    b.MouseButton1Click:Connect(function()
+        if table.find(selectedTargets, name) then
+            table.remove(selectedTargets, table.find(selectedTargets, name))
+            b.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        else
+            table.insert(selectedTargets, name)
+            b.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+        end
+    end)
+end
+
+-- Populate Abilities
+for _, key in pairs(keys) do
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, 0, 0, 22)
+    b.Text = "Auto " .. key
+    b.Parent = AbilityPanel
+    b.MouseButton1Click:Connect(function()
+        if activeAbilities[key] then
+            activeAbilities[key] = false
+            b.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        else
+            activeAbilities[key] = true
+            b.BackgroundColor3 = Color3.fromRGB(150, 100, 0)
+        end
+    end)
+end
+
+-- UI Toggles
+FilterBtn.MouseButton1Click:Connect(function() FilterPanel.Visible = not FilterPanel.Visible end)
+AbilityBtn.MouseButton1Click:Connect(function() AbilityPanel.Visible = not AbilityPanel.Visible end)
+DistInput.FocusLost:Connect(function() farmDistance = tonumber(DistInput.Text) or 5 end)
+FarmToggle.MouseButton1Click:Connect(function()
+    farming = not farming
+    FarmToggle.Text = farming and "FARM: ON" or "FARM: OFF"
+    FarmToggle.BackgroundColor3 = farming and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(150, 50, 50)
+end)
+
+--- ATTACK LOGIC ---
+local function useAbility(key)
+    local enumKey = Enum.KeyCode[key]
+    if key == "E" then
+        -- Hold Logic for E
+        vim:SendKeyEvent(true, enumKey, false, game)
+        task.wait(2) -- Adjust this for how long you want to hold E
+        vim:SendKeyEvent(false, enumKey, false, game)
+    else
+        -- Tap Logic for others
+        vim:SendKeyEvent(true, enumKey, false, game)
+        task.wait(0.1)
+        vim:SendKeyEvent(false, enumKey, false, game)
+    end
+end
+
+-- Ability Loop
+task.spawn(function()
+    while true do
+        if farming then
+            local backpack = player:FindFirstChild("Backpack")
+            local isStandless = backpack and backpack:FindFirstChild("Standless")
+            
+            if not isStandless then
+                for key, active in pairs(activeAbilities) do
+                    if active then
+                        useAbility(key)
+                        task.wait(0.5) -- Delay between different skills
+                    end
+                end
+            end
+        end
+        task.wait(1)
+    end
+end)
+
+--- POSITIONING LOGIC (Underneath) ---
+runService.Heartbeat:Connect(function()
+    if not farming or not player.Character then return end
+    local root = player.Character:FindFirstChild("HumanoidRootPart")
+    local entities = workspace:FindFirstChild("Entities") 
+    if not root or not entities then return end
+
+    for _, npc in pairs(entities:GetChildren()) do
+        if npc.Name == player.Name then continue end
+        
+        local isTarget = false
+        for _, t in pairs(selectedTargets) do
+            if string.find(npc.Name, t) then isTarget = true break end
+        end
+
+        if isTarget then
+            local dead = npc:FindFirstChild("Dead")
+            local targetPart = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Torso")
+            
+            if targetPart and dead and dead.Value == false then
+                -- Noclip
+                for _, p in pairs(player.Character:GetDescendants()) do
+                    if p:IsA("BasePart") then p.CanCollide = false end
+                end
+
+                -- Underneath Position + Face Up
+                local goalPos = targetPart.Position - Vector3.new(0, farmDistance, 0)
+                root.CFrame = CFrame.new(goalPos) * CFrame.Angles(math.rad(90), 0, 0)
+                root.AssemblyLinearVelocity = Vector3.new(0,0,0) 
+                break 
+            end
+        end
+    end
+end)
