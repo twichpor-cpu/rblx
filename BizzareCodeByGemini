@@ -1,6 +1,6 @@
 --[[ 
-    ULTIMATE FARMING HUB (V37 - FULL INTEGRATION - MERGED)
-    Updates: Floating Branding, Model Support, Dual-Zone Scan, 10-Stud Safety.
+    ULTIMATE FARMING HUB (V40 - WORLD SPACE FIXED)
+    Updates: Fixed Teleport to use World Space (Always teleports ABOVE items).
 ]]
 
 local Players = game:GetService("Players")
@@ -61,33 +61,36 @@ local function ghostTouch(obj)
     end
 end
 
--- Helper: SAFE FORWARD TELEPORT (Anti-Fling)
+-- Helper: WORLD SPACE TELEPORT (Always teleports above the item)
 local function teleportTo(obj)
     if not Running or not obj.Parent then return end
     local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
     local targetPart = getTargetPart(obj)
     
     if root and targetPart then
+        -- Stop momentum to prevent sliding/flinging
         root.AssemblyLinearVelocity = Vector3.new(0,0,0)
         root.AssemblyAngularVelocity = Vector3.new(0,0,0)
-        root.CFrame = targetPart.CFrame * CFrame.new(0, 3, 0)
+        
+        -- FIXED: Uses targetPart.Position + Vector3 to ensure TP is always UP in the world
+        -- This ignores the rotation of the banknote entirely.
+        root.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 3, 0))
     end
 end
 
 -- GUI Setup
 local ScreenGui = Instance.new("ScreenGui", Player.PlayerGui)
-ScreenGui.Name = "FarmHub_Merged_V37"; ScreenGui.ResetOnSpawn = false
+ScreenGui.Name = "FarmHub_WorldSpace_V37"; ScreenGui.ResetOnSpawn = false
 
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 240, 0, 320); MainFrame.Position = UDim2.new(0.1, 0, 0.3, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15); MainFrame.Active = true; MainFrame.BorderSizePixel = 0
 
--- Floating Version Label (The "Merged" branding)
 local VersionLabel = Instance.new("TextLabel", MainFrame)
 VersionLabel.Size = UDim2.new(1, 0, 0, 20)
-VersionLabel.Position = UDim2.new(0, 0, 1, 2) -- Positioned just below the frame
+VersionLabel.Position = UDim2.new(0, 0, 1, 2)
 VersionLabel.BackgroundTransparency = 1
-VersionLabel.Text = "ULTIMATE FARMING HUB - V37 FINAL"
+VersionLabel.Text = "ULTIMATE FARMING HUB - WORLD SPACE FIX"
 VersionLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
 VersionLabel.TextSize = 10
 VersionLabel.Font = Enum.Font.Code
