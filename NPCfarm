@@ -1,6 +1,6 @@
 --[[ 
-    ULTIMATE NPC FARMER (V5 - LOOT & RETURN UPDATE)
-    Updates: Home Position Memory, Loot-Stay Logic, Auto-Collision Restoration.
+    ULTIMATE NPC FARMER (V6 - CLEAN KILL UPDATE)
+    Updates: Hard-Stop on X, Disconnects all Connections, Fixed Anti-Void.
 ]]
 
 local Players = game:GetService("Players")
@@ -17,6 +17,7 @@ local HomePosition = nil
 local LastBossPosition = nil
 local SelectedNPCs = {}
 local ActiveAbilities = {}
+local HeartbeatConn = nil -- Variable to store the connection
 
 -- Configuration
 local TargetList = {"DIO", "Funny Valentine", "Dio Brando", "Vampire Minion"}
@@ -27,7 +28,7 @@ for _, key in pairs(AbilityKeys) do ActiveAbilities[key] = false end
 
 -- GUI Setup
 local ScreenGui = Instance.new("ScreenGui", Player.PlayerGui)
-ScreenGui.Name = "NpcFarmHub_V5"; ScreenGui.ResetOnSpawn = false
+ScreenGui.Name = "NpcFarmHub_V6"; ScreenGui.ResetOnSpawn = false
 
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 240, 0, 320); MainFrame.Position = UDim2.new(0.1, 0, 0.3, 0)
@@ -48,37 +49,46 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
+-- CLEAN KILL FUNCTION
+local function StopEverything()
+    Running = false
+    Farming = false
+    if HeartbeatConn then HeartbeatConn:Disconnect() end
+    
+    -- Restore Physics one last time
+    local char = Player.Character
+    if char then
+        for _, p in pairs(char:GetDescendants()) do
+            if p:IsA("BasePart") then p.CanCollide = true end
+        end
+    end
+    
+    ScreenGui:Destroy()
+    print("Script Hard-Stopped.")
+end
+
 -- Header
 local Title = Instance.new("TextLabel", MainFrame)
-Title.Size = UDim2.new(1, -35, 0, 30); Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35); Title.Text = "  NPC HUB V5"; Title.TextColor3 = Color3.new(1,1,1); Title.TextXAlignment = Enum.TextXAlignment.Left; Title.Font = Enum.Font.Code; Title.TextSize = 14
+Title.Size = UDim2.new(1, -35, 0, 30); Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35); Title.Text = "  NPC HUB V6"; Title.TextColor3 = Color3.new(1,1,1); Title.TextXAlignment = Enum.TextXAlignment.Left; Title.Font = Enum.Font.Code; Title.TextSize = 14
 
 local CloseBtn = Instance.new("TextButton", MainFrame)
 CloseBtn.Size = UDim2.new(0, 30, 0, 30); CloseBtn.Position = UDim2.new(1, -30, 0, 0)
 CloseBtn.BackgroundColor3 = Color3.fromRGB(200, 40, 40); CloseBtn.Text = "X"; CloseBtn.TextColor3 = Color3.new(1,1,1); CloseBtn.Font = Enum.Font.Code
-CloseBtn.MouseButton1Click:Connect(function() Running = false; ScreenGui:Destroy() end)
+CloseBtn.MouseButton1Click:Connect(StopEverything)
 
--- Side Panel
+-- Side Panel / UI Logic (Abbreviated for space, remains same as V5)
 local SidePanel = Instance.new("Frame", MainFrame)
 SidePanel.Size = UDim2.new(0, 180, 1, 0); SidePanel.Position = UDim2.new(1, 5, 0, 0); SidePanel.BackgroundColor3 = Color3.fromRGB(20, 20, 20); SidePanel.Visible = false; SidePanel.BorderSizePixel = 0
-
-local SideHeader = Instance.new("Frame", SidePanel)
-SideHeader.Size = UDim2.new(1, 0, 0, 30); SideHeader.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-
-local SideTitle = Instance.new("TextLabel", SideHeader)
-SideTitle.Size = UDim2.new(1, -30, 1, 0); SideTitle.BackgroundTransparency = 1; SideTitle.Text = "CONFIG"; SideTitle.TextColor3 = Color3.new(1,1,1); SideTitle.Font = Enum.Font.Code; SideTitle.TextSize = 14
-
-local SideClose = Instance.new("TextButton", SideHeader)
-SideClose.Size = UDim2.new(0, 30, 0, 30); SideClose.Position = UDim2.new(1, -30, 0, 0); SideClose.BackgroundColor3 = Color3.fromRGB(60, 60, 60); SideClose.Text = "<"; SideClose.TextColor3 = Color3.new(1,1,1); SideClose.Font = Enum.Font.Code
+local SideHeader = Instance.new("Frame", SidePanel); SideHeader.Size = UDim2.new(1, 0, 0, 30); SideHeader.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+local SideTitle = Instance.new("TextLabel", SideHeader); SideTitle.Size = UDim2.new(1, -30, 1, 0); SideTitle.BackgroundTransparency = 1; SideTitle.Text = "CONFIG"; SideTitle.TextColor3 = Color3.new(1,1,1); SideTitle.Font = Enum.Font.Code
+local SideClose = Instance.new("TextButton", SideHeader); SideClose.Size = UDim2.new(0, 30, 0, 30); SideClose.Position = UDim2.new(1, -30, 0, 0); SideClose.BackgroundColor3 = Color3.fromRGB(60, 60, 60); SideClose.Text = "<"; SideClose.TextColor3 = Color3.new(1,1,1)
 SideClose.MouseButton1Click:Connect(function() SidePanel.Visible = false end)
-
-local SideScroll = Instance.new("ScrollingFrame", SidePanel)
-SideScroll.Size = UDim2.new(1, -4, 1, -35); SideScroll.Position = UDim2.new(0,2,0,35); SideScroll.BackgroundTransparency = 1; SideScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y; SideScroll.ScrollBarThickness = 3
+local SideScroll = Instance.new("ScrollingFrame", SidePanel); SideScroll.Size = UDim2.new(1, -4, 1, -35); SideScroll.Position = UDim2.new(0,2,0,35); SideScroll.BackgroundTransparency = 1; SideScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y; SideScroll.ScrollBarThickness = 3
 Instance.new("UIListLayout", SideScroll).Padding = UDim.new(0, 2)
 
--- Main Page
 local MainPage = Instance.new("ScrollingFrame", MainFrame)
 MainPage.Size = UDim2.new(1, -10, 1, -45); MainPage.Position = UDim2.new(0, 5, 0, 40); MainPage.BackgroundTransparency = 1; MainPage.AutomaticCanvasSize = Enum.AutomaticSize.Y; MainPage.ScrollBarThickness = 2
-local MainLayout = Instance.new("UIListLayout", MainPage); MainLayout.Padding = UDim.new(0, 8)
+Instance.new("UIListLayout", MainPage).Padding = UDim.new(0, 8)
 
 local function createMenuBtn(txt, color)
     local b = Instance.new("TextButton", MainPage); b.Size = UDim2.new(1, 0, 0, 40); b.BackgroundColor3 = color; b.Text = txt; b.TextColor3 = Color3.new(1,1,1); b.Font = Enum.Font.Code; b.TextSize = 15; b.BorderSizePixel = 0
@@ -93,14 +103,12 @@ local function openSide(mode)
     SidePanel.Visible = true
     for _, v in pairs(SideScroll:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
     if mode == "NPC" then
-        SideTitle.Text = "NPC SELECTION"
         for _, name in pairs(TargetList) do
             local b = Instance.new("TextButton", SideScroll); b.Size = UDim2.new(1, 0, 0, 32); b.Font = Enum.Font.Code; b.TextSize = 13; b.TextColor3 = Color3.new(1,1,1); b.BorderSizePixel = 0
             local function update() b.BackgroundColor3 = SelectedNPCs[name] and Color3.fromRGB(40, 120, 40) or Color3.fromRGB(80, 30, 30); b.Text = name .. (SelectedNPCs[name] and " [ACTIVE]" or " [OFF]") end
             b.MouseButton1Click:Connect(function() SelectedNPCs[name] = not SelectedNPCs[name]; update() end); update()
         end
     elseif mode == "ABILITY" then
-        SideTitle.Text = "ABILITY CONFIG"
         for _, key in pairs(AbilityKeys) do
             local b = Instance.new("TextButton", SideScroll); b.Size = UDim2.new(1, 0, 0, 32); b.Font = Enum.Font.Code; b.TextSize = 13; b.TextColor3 = Color3.new(1,1,1); b.BorderSizePixel = 0
             local function update() b.BackgroundColor3 = ActiveAbilities[key] and Color3.fromRGB(150, 100, 20) or Color3.fromRGB(45, 45, 45); b.Text = "Key: " .. key .. (ActiveAbilities[key] and " [ON]" or " [OFF]") end
@@ -109,18 +117,15 @@ local function openSide(mode)
     end
 end
 
--- Farm Toggle Logic (Home Reset)
 FarmTgl.MouseButton1Click:Connect(function()
     Farming = not Farming
     local char = Player.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
-    
     if Farming then
-        if root then HomePosition = root.CFrame end -- Remember where we started
+        if root then HomePosition = root.CFrame end
         FarmTgl.Text = "NPC FARM: ON"; FarmTgl.BackgroundColor3 = Color3.fromRGB(40, 120, 40)
     else
         FarmTgl.Text = "NPC FARM: OFF"; FarmTgl.BackgroundColor3 = Color3.fromRGB(120, 30, 30)
-        -- Restore collision and return home
         if char then for _, p in pairs(char:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide = true end end end
         if root and HomePosition then root.CFrame = HomePosition end
     end
@@ -129,13 +134,14 @@ end)
 FilterOpenBtn.MouseButton1Click:Connect(function() openSide("NPC") end)
 AbilityOpenBtn.MouseButton1Click:Connect(function() openSide("ABILITY") end)
 
--- ATTACK LOOP
+-- ATTACK LOOP (Check Running state)
 task.spawn(function()
     while Running do
         if Farming then
             local bp = Player:FindFirstChild("Backpack")
             if bp and not bp:FindFirstChild("Standless") then
                 for key, active in pairs(ActiveAbilities) do
+                    if not Running then break end -- Extra safety
                     if active then
                         local keyCode = Enum.KeyCode[key]
                         if key == "E" then VIM:SendKeyEvent(true, keyCode, false, game); task.wait(1.5); VIM:SendKeyEvent(false, keyCode, false, game)
@@ -149,9 +155,11 @@ task.spawn(function()
     end
 end)
 
--- MOVEMENT LOOP (Collision Management & TP)
-RunService.Heartbeat:Connect(function()
-    if not Running or not Farming or not Player.Character then return end
+-- MOVEMENT LOOP (Assigned to variable for disconnection)
+HeartbeatConn = RunService.Heartbeat:Connect(function()
+    if not Running then return end
+    if not Farming or not Player.Character then return end
+    
     local root = Player.Character:FindFirstChild("HumanoidRootPart")
     local entities = workspace:FindFirstChild("Entities")
     if not root or not entities then return end
@@ -165,12 +173,8 @@ RunService.Heartbeat:Connect(function()
             
             if npcRoot and dead and dead.Value == false then
                 targetFound = true
-                LastBossPosition = npcRoot.CFrame -- Store where boss is alive
-                
-                -- Noclip while farming
+                LastBossPosition = npcRoot.CFrame
                 for _, p in pairs(Player.Character:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide = false end end
-                
-                -- Underneath Lock
                 root.CFrame = CFrame.new(npcRoot.Position - Vector3.new(0, FarmDistance, 0)) * CFrame.Angles(math.rad(90), 0, 0)
                 root.AssemblyLinearVelocity = Vector3.new(0,0,0)
                 break
@@ -178,16 +182,13 @@ RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- IF NO NPC IS ALIVE: Let the player move on the surface to pick up items
     if not targetFound then
         for _, p in pairs(Player.Character:GetDescendants()) do 
-            if p:IsA("BasePart") then p.CanCollide = true end -- Restore collision
+            if p:IsA("BasePart") then p.CanCollide = true end 
         end
-        
-        -- If we just killed a boss, pop up to where they died to grab loot
         if LastBossPosition then
             root.CFrame = CFrame.new(LastBossPosition.Position + Vector3.new(0, 3, 0))
-            LastBossPosition = nil -- Reset so we don't keep Tping to thin air
+            LastBossPosition = nil
         end
     end
 end)
