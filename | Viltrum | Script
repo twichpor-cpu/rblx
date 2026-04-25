@@ -1,0 +1,202 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+
+local connections = {}
+local bodyParts = {"Head", "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg"}
+local selectedPart = "Torso"
+
+-- GUI SETUP
+local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
+ScreenGui.Name = "CombatHelper_V6"
+ScreenGui.ResetOnSpawn = false
+
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0, 200, 0, 260) -- Height increased for Double Swing button
+MainFrame.Position = UDim2.new(0.1, 0, 0.3, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainFrame.Active = true
+MainFrame.Draggable = true
+
+local Title = Instance.new("TextLabel", MainFrame)
+Title.Size = UDim2.new(0.8, 0, 0.12, 0)
+Title.Text = "FISTS HELPER V6"
+Title.TextColor3 = Color3.new(1, 1, 1)
+Title.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+
+local CloseBtn = Instance.new("TextButton", MainFrame)
+CloseBtn.Size = UDim2.new(0.2, 0, 0.12, 0)
+CloseBtn.Position = UDim2.new(0.8, 0, 0, 0)
+CloseBtn.Text = "X"
+CloseBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+CloseBtn.TextColor3 = Color3.new(1, 1, 1)
+
+local ToggleBtn = Instance.new("TextButton", MainFrame)
+ToggleBtn.Size = UDim2.new(0.9, 0, 0.15, 0)
+ToggleBtn.Position = UDim2.new(0.05, 0, 0.15, 0)
+ToggleBtn.Text = "AUTO-HIT: OFF"
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(120, 0, 0)
+ToggleBtn.TextColor3 = Color3.new(1, 1, 1)
+
+-- NEW: DOUBLE SWING BUTTON
+local DoubleBtn = Instance.new("TextButton", MainFrame)
+DoubleBtn.Size = UDim2.new(0.9, 0, 0.15, 0)
+DoubleBtn.Position = UDim2.new(0.05, 0, 0.32, 0)
+DoubleBtn.Text = "DOUBLE SWING: OFF"
+DoubleBtn.BackgroundColor3 = Color3.fromRGB(80, 0, 120)
+DoubleBtn.TextColor3 = Color3.new(1, 1, 1)
+
+local CleanBtn = Instance.new("TextButton", MainFrame)
+CleanBtn.Size = UDim2.new(0.9, 0, 0.12, 0)
+CleanBtn.Position = UDim2.new(0.05, 0, 0.5, 0)
+CleanBtn.Text = "Clean All 'Zones'"
+CleanBtn.BackgroundColor3 = Color3.fromRGB(0, 80, 150)
+CleanBtn.TextColor3 = Color3.new(1, 1, 1)
+
+local DropdownBtn = Instance.new("TextButton", MainFrame)
+DropdownBtn.Size = UDim2.new(0.9, 0, 0.12, 0)
+DropdownBtn.Position = UDim2.new(0.05, 0, 0.65, 0)
+DropdownBtn.Text = "Target: " .. selectedPart
+DropdownBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+DropdownBtn.TextColor3 = Color3.new(1, 1, 1)
+
+local DropdownFrame = Instance.new("ScrollingFrame", MainFrame)
+DropdownFrame.Size = UDim2.new(0.9, 0, 0.3, 0)
+DropdownFrame.Position = UDim2.new(0.05, 0, 0.78, 0)
+DropdownFrame.Visible = false
+DropdownFrame.CanvasSize = UDim2.new(0, 0, 2, 0)
+DropdownFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+DropdownFrame.ZIndex = 5
+
+local UIListLayout = Instance.new("UIListLayout", DropdownFrame)
+
+-- Variables
+local autoHitActive = false
+local doubleSwingActive = false
+local isBlocking = false
+local lastSpecial = 0
+
+-- Populate Dropdown
+for _, partName in pairs(bodyParts) do
+    local b = Instance.new("TextButton", DropdownFrame)
+    b.Size = UDim2.new(1, 0, 0, 25)
+    b.Text = partName
+    b.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.ZIndex = 6
+    b.MouseButton1Click:Connect(function()
+        selectedPart = partName
+        DropdownBtn.Text = "Target: " .. partName
+        DropdownFrame.Visible = false
+    end)
+end
+
+-- Button Logic
+DropdownBtn.MouseButton1Click:Connect(function() DropdownFrame.Visible = not DropdownFrame.Visible end)
+
+ToggleBtn.MouseButton1Click:Connect(function()
+    autoHitActive = not autoHitActive
+    ToggleBtn.Text = "AUTO-HIT: " .. (autoHitActive and "ON" or "OFF")
+    ToggleBtn.BackgroundColor3 = autoHitActive and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(120, 0, 0)
+end)
+
+DoubleBtn.MouseButton1Click:Connect(function()
+    doubleSwingActive = not doubleSwingActive
+    DoubleBtn.Text = "DOUBLE SWING: " .. (doubleSwingActive and "ON" or "OFF")
+    DoubleBtn.BackgroundColor3 = doubleSwingActive and Color3.fromRGB(150, 0, 200) or Color3.fromRGB(80, 0, 120)
+end)
+
+CleanBtn.MouseButton1Click:Connect(function()
+    local count = 0
+    for _, obj in pairs(game.Workspace:GetDescendants()) do
+        if (obj:IsA("BasePart") or obj:IsA("Model")) and string.find(string.lower(obj.Name), "zone") then
+            obj:Destroy()
+            count = count + 1
+        end
+    end
+    CleanBtn.Text = "Deleted " .. count .. " Zones!"
+    task.delay(2, function() CleanBtn.Text = "Clean All 'Zones'" end)
+end)
+
+CloseBtn.MouseButton1Click:Connect(function()
+    for _, conn in pairs(connections) do conn:Disconnect() end
+    ScreenGui:Destroy()
+end)
+
+-- Combat Functions
+local function getEquippedFists()
+    local char = LocalPlayer.Character
+    return char and char:FindFirstChild("Fists") and char.Fists:FindFirstChild("fistremote")
+end
+
+local function getClosestPlayer()
+    local closest, dist = nil, 15
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local d = (player.Character.HumanoidRootPart.Position - char.HumanoidRootPart.Position).Magnitude
+            if d < dist then dist = d closest = player end
+        end
+    end
+    return closest
+end
+
+local function fireRemote(remote, ...)
+    remote:FireServer(...)
+end
+
+local function performAttack(actionType, val)
+    local remote = getEquippedFists()
+    if not remote then return end 
+
+    -- Filter clicks on UI
+    local guiObjects = LocalPlayer.PlayerGui:GetGuiObjectsAtPosition(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y)
+    for _, obj in pairs(guiObjects) do if obj:IsDescendantOf(MainFrame) then return end end
+
+    -- Determine fire count
+    local fireCount = (actionType == "lmb" and doubleSwingActive) and 2 or 1
+
+    for i = 1, fireCount do
+        -- 1. Send the Action (Swing/Key)
+        fireRemote(remote, actionType, val)
+
+        -- 2. Send the Hit (Auto-Hit)
+        if autoHitActive and not isBlocking then
+            local target = getClosestPlayer()
+            if target and target.Character then
+                local targetPart = target.Character:FindFirstChild(selectedPart)
+                if targetPart then
+                    task.wait(0.04) -- Small delay between swing and hit
+                    fireRemote(remote, "part", targetPart, targetPart.Position, Vector3.new(0, 0, 0))
+                end
+            end
+        end
+        
+        if fireCount > 1 and i < fireCount then
+            task.wait(0.05) -- Delay between first and second swing
+        end
+    end
+end
+
+-- Input Listeners
+table.insert(connections, UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        performAttack("lmb")
+    elseif input.KeyCode == Enum.KeyCode.Q or input.KeyCode == Enum.KeyCode.E then
+        if tick() - lastSpecial > 0.6 then
+            lastSpecial = tick()
+            performAttack("keypress", input.KeyCode == Enum.KeyCode.Q and "q" or "e")
+        end
+    elseif input.KeyCode == Enum.KeyCode.F then
+        isBlocking = true
+        performAttack("keypress", "f")
+    elseif input.KeyCode == Enum.KeyCode.R then
+        performAttack("keypress", "r")
+    end
+end))
+
+table.insert(connections, UserInputService.InputEnded:Connect(function(input, gpe)
+    if input.KeyCode == Enum.KeyCode.F then isBlocking = false end
+end))
