@@ -9,46 +9,45 @@ local selectedPart = "Torso"
 
 -- GUI SETUP
 local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
-ScreenGui.Name = "CombatHelper_V10"
+ScreenGui.Name = "CombatHelper_V11"
 ScreenGui.ResetOnSpawn = false
 
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 200, 0, 260)
 MainFrame.Position = UDim2.new(0.1, 0, 0.4, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.Active = true
 MainFrame.Draggable = true
 
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(0.8, 0, 0.12, 0)
-Title.Text = "FISTS HELPER V10"
+Title.Text = "FISTS HELPER V11"
 Title.TextColor3 = Color3.new(1, 1, 1)
-Title.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 
 local CloseBtn = Instance.new("TextButton", MainFrame)
 CloseBtn.Size = UDim2.new(0.2, 0, 0.12, 0)
 CloseBtn.Position = UDim2.new(0.8, 0, 0, 0)
 CloseBtn.Text = "X"
-CloseBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
 CloseBtn.TextColor3 = Color3.new(1, 1, 1)
 
--- MULTIPLIER SECTION
+-- MULTIPLIER SECTION (LIMIT REMOVED)
 local MultInput = Instance.new("TextBox", MainFrame)
 MultInput.Size = UDim2.new(0.35, 0, 0.15, 0)
 MultInput.Position = UDim2.new(0.05, 0, 0.15, 0)
 MultInput.PlaceholderText = "Mult"
 MultInput.Text = "2"
-MultInput.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+MultInput.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 MultInput.TextColor3 = Color3.new(1, 1, 1)
 
 local MultToggle = Instance.new("TextButton", MainFrame)
 MultToggle.Size = UDim2.new(0.5, 0, 0.15, 0)
 MultToggle.Position = UDim2.new(0.45, 0, 0.15, 0)
 MultToggle.Text = "MULT: OFF"
-MultToggle.BackgroundColor3 = Color3.fromRGB(80, 0, 100)
+MultToggle.BackgroundColor3 = Color3.fromRGB(70, 0, 100)
 MultToggle.TextColor3 = Color3.new(1, 1, 1)
 
--- OTHER BUTTONS
 local ToggleBtn = Instance.new("TextButton", MainFrame)
 ToggleBtn.Size = UDim2.new(0.9, 0, 0.15, 0)
 ToggleBtn.Position = UDim2.new(0.05, 0, 0.33, 0)
@@ -60,7 +59,7 @@ local CleanBtn = Instance.new("TextButton", MainFrame)
 CleanBtn.Size = UDim2.new(0.9, 0, 0.12, 0)
 CleanBtn.Position = UDim2.new(0.05, 0, 0.52, 0)
 CleanBtn.Text = "Clean All 'Zones'"
-CleanBtn.BackgroundColor3 = Color3.fromRGB(0, 60, 120)
+CleanBtn.BackgroundColor3 = Color3.fromRGB(0, 70, 150)
 CleanBtn.TextColor3 = Color3.new(1, 1, 1)
 
 local DropdownBtn = Instance.new("TextButton", MainFrame)
@@ -75,22 +74,22 @@ DropdownFrame.Size = UDim2.new(0.9, 0, 0.4, 0)
 DropdownFrame.Position = UDim2.new(0.05, 0, 0.85, 0)
 DropdownFrame.Visible = false
 DropdownFrame.CanvasSize = UDim2.new(0, 0, 2, 0)
-DropdownFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+DropdownFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 DropdownFrame.ZIndex = 5
 Instance.new("UIListLayout", DropdownFrame)
 
--- VARIABLES
+-- LOGIC VARIABLES
 local autoHitActive = false
 local multActive = false
 local isBlocking = false
 local lastSpecial = 0
 
--- UI LOGIC
+-- UI CONNECTIONS
 for _, partName in pairs(bodyParts) do
     local b = Instance.new("TextButton", DropdownFrame)
     b.Size = UDim2.new(1, 0, 0, 25)
     b.Text = partName
-    b.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    b.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
     b.TextColor3 = Color3.new(1, 1, 1)
     b.ZIndex = 6
     b.MouseButton1Click:Connect(function()
@@ -104,12 +103,12 @@ DropdownBtn.MouseButton1Click:Connect(function() DropdownFrame.Visible = not Dro
 ToggleBtn.MouseButton1Click:Connect(function()
     autoHitActive = not autoHitActive
     ToggleBtn.Text = "AUTO-HIT: " .. (autoHitActive and "ON" or "OFF")
-    ToggleBtn.BackgroundColor3 = autoHitActive and Color3.fromRGB(0, 100, 0) or Color3.fromRGB(100, 0, 0)
+    ToggleBtn.BackgroundColor3 = autoHitActive and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(120, 0, 0)
 end)
 MultToggle.MouseButton1Click:Connect(function()
     multActive = not multActive
     MultToggle.Text = "MULT: " .. (multActive and "ON" or "OFF")
-    MultToggle.BackgroundColor3 = multActive and Color3.fromRGB(150, 0, 200) or Color3.fromRGB(80, 0, 100)
+    MultToggle.BackgroundColor3 = multActive and Color3.fromRGB(180, 0, 255) or Color3.fromRGB(70, 0, 100)
 end)
 CleanBtn.MouseButton1Click:Connect(function()
     local count = 0
@@ -127,7 +126,7 @@ CloseBtn.MouseButton1Click:Connect(function()
     ScreenGui:Destroy()
 end)
 
--- GET TARGET
+-- TARGETING
 local function getBestTarget()
     local target = Mouse.Target
     if target and target.Parent and target.Parent:FindFirstChild("Humanoid") then return target.Parent end
@@ -143,25 +142,23 @@ local function getBestTarget()
     return closest
 end
 
--- ATTACK LOGIC
+-- ATTACK ENGINE
 local function performAttack(actionType, val)
     local char = LocalPlayer.Character
     local remote = char and char:FindFirstChild("Fists") and char.Fists:FindFirstChild("fistremote")
     if not remote then return end 
 
+    -- Filter UI
     local guiObjects = LocalPlayer.PlayerGui:GetGuiObjectsAtPosition(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y)
     for _, obj in pairs(guiObjects) do if obj:IsDescendantOf(MainFrame) then return end end
 
-    -- Multiplier Check
+    -- Multiplier Logic (No Limit)
     local count = (actionType == "lmb" and multActive) and (tonumber(MultInput.Text) or 1) or 1
-    
-    -- Limit the multiplier so you don't instantly crash or get banned
-    if count > 10 then count = 10 end
 
-    -- Fire the actual swing once
+    -- Fire Swing
     remote:FireServer(actionType, val)
 
-    -- Rapid fire the damage packets
+    -- Fire Damage
     if autoHitActive and not isBlocking then
         local targetChar = getBestTarget()
         if targetChar then
@@ -169,8 +166,7 @@ local function performAttack(actionType, val)
             if targetPart then
                 for i = 1, count do
                     remote:FireServer("part", targetPart, targetPart.Position, Vector3.new(0, 0, 0))
-                    -- Ultra-short delay to bypass basic spam filters
-                    if count > 1 then task.wait(0.01) end 
+                    -- No delay between packets for instant damage burst
                 end
             end
         end
