@@ -7,13 +7,20 @@ local connections = {}
 local bodyParts = {"Head", "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg"}
 local selectedPart = "Torso"
 
+-- LOGIC VARIABLES
+local autoHitActive = false
+local multActive = false
+local multiTargetActive = false
+local isBlocking = false
+local lastSpecial = 0
+
 -- GUI SETUP
 local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
-ScreenGui.Name = "CombatHelper_V11"
+ScreenGui.Name = "CombatHelper_V12_Final"
 ScreenGui.ResetOnSpawn = false
 
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 200, 0, 260)
+MainFrame.Size = UDim2.new(0, 220, 0, 280)
 MainFrame.Position = UDim2.new(0.1, 0, 0.4, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.Active = true
@@ -21,7 +28,7 @@ MainFrame.Draggable = true
 
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(0.8, 0, 0.12, 0)
-Title.Text = "FISTS HELPER V11"
+Title.Text = "FISTS HELPER V12"
 Title.TextColor3 = Color3.new(1, 1, 1)
 Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 
@@ -32,7 +39,7 @@ CloseBtn.Text = "X"
 CloseBtn.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
 CloseBtn.TextColor3 = Color3.new(1, 1, 1)
 
--- MULTIPLIER SECTION (LIMIT REMOVED)
+-- MULTIPLIER SECTION
 local MultInput = Instance.new("TextBox", MainFrame)
 MultInput.Size = UDim2.new(0.35, 0, 0.15, 0)
 MultInput.Position = UDim2.new(0.05, 0, 0.15, 0)
@@ -49,11 +56,18 @@ MultToggle.BackgroundColor3 = Color3.fromRGB(70, 0, 100)
 MultToggle.TextColor3 = Color3.new(1, 1, 1)
 
 local ToggleBtn = Instance.new("TextButton", MainFrame)
-ToggleBtn.Size = UDim2.new(0.9, 0, 0.15, 0)
+ToggleBtn.Size = UDim2.new(0.44, 0, 0.15, 0)
 ToggleBtn.Position = UDim2.new(0.05, 0, 0.33, 0)
-ToggleBtn.Text = "AUTO-HIT: OFF"
+ToggleBtn.Text = "AUTO: OFF"
 ToggleBtn.BackgroundColor3 = Color3.fromRGB(100, 0, 0)
 ToggleBtn.TextColor3 = Color3.new(1, 1, 1)
+
+local MultiTargetBtn = Instance.new("TextButton", MainFrame)
+MultiTargetBtn.Size = UDim2.new(0.44, 0, 0.15, 0)
+MultiTargetBtn.Position = UDim2.new(0.51, 0, 0.33, 0)
+MultiTargetBtn.Text = "MULTI: OFF"
+MultiTargetBtn.BackgroundColor3 = Color3.fromRGB(100, 50, 0)
+MultiTargetBtn.TextColor3 = Color3.new(1, 1, 1)
 
 local CleanBtn = Instance.new("TextButton", MainFrame)
 CleanBtn.Size = UDim2.new(0.9, 0, 0.12, 0)
@@ -78,13 +92,59 @@ DropdownFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 DropdownFrame.ZIndex = 5
 Instance.new("UIListLayout", DropdownFrame)
 
--- LOGIC VARIABLES
-local autoHitActive = false
-local multActive = false
-local isBlocking = false
-local lastSpecial = 0
+-- TARGETING ENGINE
+local function getTargets()
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return {} end
+    local found = {}
+    local maxDist = 12
+    
+    if multiTargetActive then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                local d = (player.Character.HumanoidRootPart.Position - char.HumanoidRootPart.Position).Magnitude
+                if d <= maxDist then table.insert(found, player.Character) end
+            end
+        end
+    else
+        local closest, dist = nil, maxDist
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                local d = (player.Character.HumanoidRootPart.Position - char.HumanoidRootPart.Position).Magnitude
+                if d < dist then dist = d closest = player.Character end
+            end
+        end
+        if closest then table.insert(found, closest) end
+    end
+    return found
+end
 
--- UI CONNECTIONS
+-- ATTACK ENGINE
+local function performAttack(actionType, val)
+    local char = LocalPlayer.Character
+    local remote = char and char:FindFirstChild("Fists") and char.Fists:FindFirstChild("fistremote")
+    if not remote then return end 
+
+    local guiObjects = LocalPlayer.PlayerGui:GetGuiObjectsAtPosition(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y)
+    for _, obj in pairs(guiObjects) do if obj:IsDescendantOf(MainFrame) then return end end
+
+    local count = (actionType == "lmb" and multActive) and (tonumber(MultInput.Text) or 1) or 1
+    remote:FireServer(actionType, val)
+
+    if autoHitActive and not isBlocking then
+        local targets = getTargets()
+        for _, targetChar in pairs(targets) do
+            local targetPart = targetChar:FindFirstChild(selectedPart)
+            if targetPart then
+                for i = 1, count do
+                    remote:FireServer("part", targetPart, targetPart.Position, Vector3.new(0, 0, 0))
+                end
+            end
+        end
+    end
+end
+
+-- UI LOGIC
 for _, partName in pairs(bodyParts) do
     local b = Instance.new("TextButton", DropdownFrame)
     b.Size = UDim2.new(1, 0, 0, 25)
@@ -100,16 +160,25 @@ for _, partName in pairs(bodyParts) do
 end
 
 DropdownBtn.MouseButton1Click:Connect(function() DropdownFrame.Visible = not DropdownFrame.Visible end)
+
 ToggleBtn.MouseButton1Click:Connect(function()
     autoHitActive = not autoHitActive
-    ToggleBtn.Text = "AUTO-HIT: " .. (autoHitActive and "ON" or "OFF")
+    ToggleBtn.Text = "AUTO: " .. (autoHitActive and "ON" or "OFF")
     ToggleBtn.BackgroundColor3 = autoHitActive and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(120, 0, 0)
 end)
+
+MultiTargetBtn.MouseButton1Click:Connect(function()
+    multiTargetActive = not multiTargetActive
+    MultiTargetBtn.Text = "MULTI: " .. (multiTargetActive and "ON" or "OFF")
+    MultiTargetBtn.BackgroundColor3 = multiTargetActive and Color3.fromRGB(0, 150, 150) or Color3.fromRGB(100, 50, 0)
+end)
+
 MultToggle.MouseButton1Click:Connect(function()
     multActive = not multActive
     MultToggle.Text = "MULT: " .. (multActive and "ON" or "OFF")
     MultToggle.BackgroundColor3 = multActive and Color3.fromRGB(180, 0, 255) or Color3.fromRGB(70, 0, 100)
 end)
+
 CleanBtn.MouseButton1Click:Connect(function()
     local count = 0
     for _, obj in pairs(game.Workspace:GetDescendants()) do
@@ -121,59 +190,27 @@ CleanBtn.MouseButton1Click:Connect(function()
     CleanBtn.Text = "Deleted " .. count .. " Zones!"
     task.delay(1.5, function() CleanBtn.Text = "Clean All 'Zones'" end)
 end)
+
+-- SHUTDOWN LOGIC
 CloseBtn.MouseButton1Click:Connect(function()
-    for _, conn in pairs(connections) do conn:Disconnect() end
+    -- Kill all toggles instantly
+    autoHitActive = false
+    multActive = false
+    multiTargetActive = false
+    isBlocking = false
+    
+    -- Disconnect all events (InputBegan, InputEnded, etc)
+    for _, conn in pairs(connections) do 
+        if conn then conn:Disconnect() end 
+    end
+    connections = {}
+    
+    -- Destroy UI
     ScreenGui:Destroy()
+    print("Script safely shut down.")
 end)
 
--- TARGETING
-local function getBestTarget()
-    local target = Mouse.Target
-    if target and target.Parent and target.Parent:FindFirstChild("Humanoid") then return target.Parent end
-    local closest, dist = nil, 12
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
-    for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-            local d = (player.Character.HumanoidRootPart.Position - char.HumanoidRootPart.Position).Magnitude
-            if d < dist then dist = d closest = player.Character end
-        end
-    end
-    return closest
-end
-
--- ATTACK ENGINE
-local function performAttack(actionType, val)
-    local char = LocalPlayer.Character
-    local remote = char and char:FindFirstChild("Fists") and char.Fists:FindFirstChild("fistremote")
-    if not remote then return end 
-
-    -- Filter UI
-    local guiObjects = LocalPlayer.PlayerGui:GetGuiObjectsAtPosition(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y)
-    for _, obj in pairs(guiObjects) do if obj:IsDescendantOf(MainFrame) then return end end
-
-    -- Multiplier Logic (No Limit)
-    local count = (actionType == "lmb" and multActive) and (tonumber(MultInput.Text) or 1) or 1
-
-    -- Fire Swing
-    remote:FireServer(actionType, val)
-
-    -- Fire Damage
-    if autoHitActive and not isBlocking then
-        local targetChar = getBestTarget()
-        if targetChar then
-            local targetPart = targetChar:FindFirstChild(selectedPart)
-            if targetPart then
-                for i = 1, count do
-                    remote:FireServer("part", targetPart, targetPart.Position, Vector3.new(0, 0, 0))
-                    -- No delay between packets for instant damage burst
-                end
-            end
-        end
-    end
-end
-
--- INPUTS
+-- INPUT CONNECTIONS
 table.insert(connections, UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
