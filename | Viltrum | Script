@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
@@ -14,26 +15,32 @@ local multiTargetActive = false
 local isBlocking = false
 local lastSpecial = 0
 
+-- AURA FARM VARIABLES
+local auraActive = false
+local currentAnimTrack = nil
+local auraAnimID = "rbxassetid://125469815548571"
+local defaultIdleID = "rbxassetid://115367110113662"
+
 -- GUI SETUP
 local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
 ScreenGui.Name = "CombatHelper_V12_Final"
 ScreenGui.ResetOnSpawn = false
 
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 220, 0, 280)
+MainFrame.Size = UDim2.new(0, 220, 0, 320) -- Increased height for new button
 MainFrame.Position = UDim2.new(0.1, 0, 0.4, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.Active = true
 MainFrame.Draggable = true
 
 local Title = Instance.new("TextLabel", MainFrame)
-Title.Size = UDim2.new(0.8, 0, 0.12, 0)
+Title.Size = UDim2.new(0.8, 0, 0.1, 0)
 Title.Text = "FISTS HELPER V12"
 Title.TextColor3 = Color3.new(1, 1, 1)
 Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 
 local CloseBtn = Instance.new("TextButton", MainFrame)
-CloseBtn.Size = UDim2.new(0.2, 0, 0.12, 0)
+CloseBtn.Size = UDim2.new(0.2, 0, 0.1, 0)
 CloseBtn.Position = UDim2.new(0.8, 0, 0, 0)
 CloseBtn.Text = "X"
 CloseBtn.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
@@ -41,51 +48,59 @@ CloseBtn.TextColor3 = Color3.new(1, 1, 1)
 
 -- MULTIPLIER SECTION
 local MultInput = Instance.new("TextBox", MainFrame)
-MultInput.Size = UDim2.new(0.35, 0, 0.15, 0)
-MultInput.Position = UDim2.new(0.05, 0, 0.15, 0)
+MultInput.Size = UDim2.new(0.35, 0, 0.13, 0)
+MultInput.Position = UDim2.new(0.05, 0, 0.12, 0)
 MultInput.PlaceholderText = "Mult"
 MultInput.Text = "2"
 MultInput.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 MultInput.TextColor3 = Color3.new(1, 1, 1)
 
 local MultToggle = Instance.new("TextButton", MainFrame)
-MultToggle.Size = UDim2.new(0.5, 0, 0.15, 0)
-MultToggle.Position = UDim2.new(0.45, 0, 0.15, 0)
+MultToggle.Size = UDim2.new(0.5, 0, 0.13, 0)
+MultToggle.Position = UDim2.new(0.45, 0, 0.12, 0)
 MultToggle.Text = "MULT: OFF"
 MultToggle.BackgroundColor3 = Color3.fromRGB(70, 0, 100)
 MultToggle.TextColor3 = Color3.new(1, 1, 1)
 
 local ToggleBtn = Instance.new("TextButton", MainFrame)
-ToggleBtn.Size = UDim2.new(0.44, 0, 0.15, 0)
-ToggleBtn.Position = UDim2.new(0.05, 0, 0.33, 0)
+ToggleBtn.Size = UDim2.new(0.44, 0, 0.13, 0)
+ToggleBtn.Position = UDim2.new(0.05, 0, 0.27, 0)
 ToggleBtn.Text = "AUTO: OFF"
 ToggleBtn.BackgroundColor3 = Color3.fromRGB(100, 0, 0)
 ToggleBtn.TextColor3 = Color3.new(1, 1, 1)
 
 local MultiTargetBtn = Instance.new("TextButton", MainFrame)
-MultiTargetBtn.Size = UDim2.new(0.44, 0, 0.15, 0)
-MultiTargetBtn.Position = UDim2.new(0.51, 0, 0.33, 0)
+MultiTargetBtn.Size = UDim2.new(0.44, 0, 0.13, 0)
+MultiTargetBtn.Position = UDim2.new(0.51, 0, 0.27, 0)
 MultiTargetBtn.Text = "MULTI: OFF"
 MultiTargetBtn.BackgroundColor3 = Color3.fromRGB(100, 50, 0)
 MultiTargetBtn.TextColor3 = Color3.new(1, 1, 1)
 
 local CleanBtn = Instance.new("TextButton", MainFrame)
-CleanBtn.Size = UDim2.new(0.9, 0, 0.12, 0)
-CleanBtn.Position = UDim2.new(0.05, 0, 0.52, 0)
+CleanBtn.Size = UDim2.new(0.9, 0, 0.1, 0)
+CleanBtn.Position = UDim2.new(0.05, 0, 0.42, 0)
 CleanBtn.Text = "Clean All 'Zones'"
 CleanBtn.BackgroundColor3 = Color3.fromRGB(0, 70, 150)
 CleanBtn.TextColor3 = Color3.new(1, 1, 1)
 
+-- NEW AURA FARM BUTTON
+local AuraBtn = Instance.new("TextButton", MainFrame)
+AuraBtn.Size = UDim2.new(0.9, 0, 0.1, 0)
+AuraBtn.Position = UDim2.new(0.05, 0, 0.54, 0)
+AuraBtn.Text = "Aura Farm: OFF"
+AuraBtn.BackgroundColor3 = Color3.fromRGB(100, 0, 0)
+AuraBtn.TextColor3 = Color3.new(1, 1, 1)
+
 local DropdownBtn = Instance.new("TextButton", MainFrame)
-DropdownBtn.Size = UDim2.new(0.9, 0, 0.12, 0)
-DropdownBtn.Position = UDim2.new(0.05, 0, 0.68, 0)
+DropdownBtn.Size = UDim2.new(0.9, 0, 0.1, 0)
+DropdownBtn.Position = UDim2.new(0.05, 0, 0.66, 0)
 DropdownBtn.Text = "Target: " .. selectedPart
 DropdownBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 DropdownBtn.TextColor3 = Color3.new(1, 1, 1)
 
 local DropdownFrame = Instance.new("ScrollingFrame", MainFrame)
-DropdownFrame.Size = UDim2.new(0.9, 0, 0.4, 0)
-DropdownFrame.Position = UDim2.new(0.05, 0, 0.85, 0)
+DropdownFrame.Size = UDim2.new(0.9, 0, 0.3, 0)
+DropdownFrame.Position = UDim2.new(0.05, 0, 0.78, 0)
 DropdownFrame.Visible = false
 DropdownFrame.CanvasSize = UDim2.new(0, 0, 2, 0)
 DropdownFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
@@ -144,6 +159,46 @@ local function performAttack(actionType, val)
     end
 end
 
+-- AURA ANIMATION LOGIC
+local function stopCurrentAnim()
+    if currentAnimTrack then
+        currentAnimTrack:Stop()
+        currentAnimTrack = nil
+    end
+end
+
+local function playAnim(id)
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        stopCurrentAnim()
+        local anim = Instance.new("Animation")
+        anim.AnimationId = id
+        currentAnimTrack = hum:LoadAnimation(anim)
+        currentAnimTrack.Looped = true
+        currentAnimTrack.Priority = Enum.AnimationPriority.Action
+        currentAnimTrack:Play()
+    end
+end
+
+-- MOVEMENT MONITOR FOR AURA FARM
+table.insert(connections, RunService.RenderStepped:Connect(function()
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    
+    if not hum or not auraActive then return end
+
+    if hum.MoveDirection.Magnitude == 0 then
+        if not currentAnimTrack or currentAnimTrack.AnimationId ~= auraAnimID then
+            playAnim(auraAnimID)
+        end
+    else
+        if currentAnimTrack and currentAnimTrack.AnimationId == auraAnimID then
+            stopCurrentAnim()
+        end
+    end
+end))
+
 -- UI LOGIC
 for _, partName in pairs(bodyParts) do
     local b = Instance.new("TextButton", DropdownFrame)
@@ -191,21 +246,33 @@ CleanBtn.MouseButton1Click:Connect(function()
     task.delay(1.5, function() CleanBtn.Text = "Clean All 'Zones'" end)
 end)
 
+AuraBtn.MouseButton1Click:Connect(function()
+    auraActive = not auraActive
+    AuraBtn.Text = "Aura Farm: " .. (auraActive and "ON" or "OFF")
+    AuraBtn.BackgroundColor3 = auraActive and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(120, 0, 0)
+    
+    if not auraActive then
+        stopCurrentAnim()
+        playAnim(defaultIdleID)
+        task.wait(0.3)
+        stopCurrentAnim()
+    end
+end)
+
 -- SHUTDOWN LOGIC
 CloseBtn.MouseButton1Click:Connect(function()
-    -- Kill all toggles instantly
     autoHitActive = false
     multActive = false
     multiTargetActive = false
     isBlocking = false
+    auraActive = false
+    stopCurrentAnim()
     
-    -- Disconnect all events (InputBegan, InputEnded, etc)
     for _, conn in pairs(connections) do 
         if conn then conn:Disconnect() end 
     end
     connections = {}
     
-    -- Destroy UI
     ScreenGui:Destroy()
     print("Script safely shut down.")
 end)
