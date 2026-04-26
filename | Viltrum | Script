@@ -8,7 +8,7 @@ local connections = {}
 -- Added "Ratio" to the start of the list [cite: 1]
 local bodyParts = {"Ratio", "Head", "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg"}
 local selectedPart = "Torso"
-local hitRatio = 70 -- Default 70% headshot ratio
+local hitRatio = 35 -- Default 35% headshot ratio
 
 -- LOGIC VARIABLES
 local autoHitActive = false
@@ -108,14 +108,14 @@ RatioFrame.Visible = false
 
 local RatioLabel = Instance.new("TextLabel", RatioFrame)
 RatioLabel.Size = UDim2.new(1, 0, 0.5, 0)
-RatioLabel.Text = "Headshot Ratio: 70%"
+RatioLabel.Text = "Headshot Ratio: 35%"
 RatioLabel.TextColor3 = Color3.new(1, 1, 1)
 RatioLabel.BackgroundTransparency = 1
 
 local RatioInput = Instance.new("TextBox", RatioFrame)
 RatioInput.Size = UDim2.new(0.8, 0, 0.4, 0)
 RatioInput.Position = UDim2.new(0.1, 0, 0.5, 0)
-RatioInput.Text = "70"
+RatioInput.Text = "35"
 RatioInput.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
 RatioInput.TextColor3 = Color3.new(1, 1, 1)
 
