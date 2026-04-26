@@ -27,7 +27,7 @@ ScreenGui.Name = "CombatHelper_V12_Final"
 ScreenGui.ResetOnSpawn = false
 
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 220, 0, 320) -- Increased height for new button
+MainFrame.Size = UDim2.new(0, 220, 0, 320)
 MainFrame.Position = UDim2.new(0.1, 0, 0.4, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.Active = true
@@ -46,7 +46,7 @@ CloseBtn.Text = "X"
 CloseBtn.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
 CloseBtn.TextColor3 = Color3.new(1, 1, 1)
 
--- MULTIPLIER SECTION
+-- UI BUTTONS (Auto-Hit, Multi, Clean, etc. [cite: 2, 3])
 local MultInput = Instance.new("TextBox", MainFrame)
 MultInput.Size = UDim2.new(0.35, 0, 0.13, 0)
 MultInput.Position = UDim2.new(0.05, 0, 0.12, 0)
@@ -83,7 +83,6 @@ CleanBtn.Text = "Clean All 'Zones'"
 CleanBtn.BackgroundColor3 = Color3.fromRGB(0, 70, 150)
 CleanBtn.TextColor3 = Color3.new(1, 1, 1)
 
--- NEW AURA FARM BUTTON
 local AuraBtn = Instance.new("TextButton", MainFrame)
 AuraBtn.Size = UDim2.new(0.9, 0, 0.1, 0)
 AuraBtn.Position = UDim2.new(0.05, 0, 0.54, 0)
@@ -107,13 +106,12 @@ DropdownFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 DropdownFrame.ZIndex = 5
 Instance.new("UIListLayout", DropdownFrame)
 
--- TARGETING ENGINE
+-- TARGETING & ATTACK ENGINE [cite: 5, 7, 8]
 local function getTargets()
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return {} end
     local found = {}
     local maxDist = 12
-    
     if multiTargetActive then
         for _, player in pairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
@@ -134,18 +132,12 @@ local function getTargets()
     return found
 end
 
--- ATTACK ENGINE
 local function performAttack(actionType, val)
     local char = LocalPlayer.Character
     local remote = char and char:FindFirstChild("Fists") and char.Fists:FindFirstChild("fistremote")
     if not remote then return end 
-
-    local guiObjects = LocalPlayer.PlayerGui:GetGuiObjectsAtPosition(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y)
-    for _, obj in pairs(guiObjects) do if obj:IsDescendantOf(MainFrame) then return end end
-
     local count = (actionType == "lmb" and multActive) and (tonumber(MultInput.Text) or 1) or 1
     remote:FireServer(actionType, val)
-
     if autoHitActive and not isBlocking then
         local targets = getTargets()
         for _, targetChar in pairs(targets) do
@@ -159,19 +151,19 @@ local function performAttack(actionType, val)
     end
 end
 
--- AURA ANIMATION LOGIC
-local function stopCurrentAnim()
+-- ANIMATION LOGIC (Aura Farm [cite: 7])
+local function stopAura()
     if currentAnimTrack then
-        currentAnimTrack:Stop()
+        currentAnimTrack:Stop(0.1)
         currentAnimTrack = nil
     end
 end
 
-local function playAnim(id)
+local function playAura(id)
     local char = LocalPlayer.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if hum then
-        stopCurrentAnim()
+    if hum and hum.Health > 0 then
+        stopAura()
         local anim = Instance.new("Animation")
         anim.AnimationId = id
         currentAnimTrack = hum:LoadAnimation(anim)
@@ -181,25 +173,37 @@ local function playAnim(id)
     end
 end
 
--- MOVEMENT MONITOR FOR AURA FARM
-table.insert(connections, RunService.RenderStepped:Connect(function()
+-- MOVEMENT FIX: Forces animation to stop if moving
+table.insert(connections, RunService.Heartbeat:Connect(function()
     local char = LocalPlayer.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
-    
     if not hum or not auraActive then return end
 
-    if hum.MoveDirection.Magnitude == 0 then
-        if not currentAnimTrack or currentAnimTrack.AnimationId ~= auraAnimID then
-            playAnim(auraAnimID)
+    -- Check for any movement or jumping [cite: 1]
+    local isMoving = hum.MoveDirection.Magnitude > 0
+    local isJumping = hum:GetState() == Enum.HumanoidStateType.Jumping or hum:GetState() == Enum.HumanoidStateType.Freefall
+
+    if isMoving or isJumping then
+        if currentAnimTrack and currentAnimTrack.IsPlaying then
+            stopAura()
         end
     else
-        if currentAnimTrack and currentAnimTrack.AnimationId == auraAnimID then
-            stopCurrentAnim()
+        -- Standing still, restart Aura if not playing
+        if not currentAnimTrack or not currentAnimTrack.IsPlaying then
+            playAura(auraAnimID)
         end
     end
 end))
 
--- UI LOGIC
+-- UI LOGIC [cite: 9, 10, 11]
+AuraBtn.MouseButton1Click:Connect(function()
+    auraActive = not auraActive
+    AuraBtn.Text = "Aura Farm: " .. (auraActive and "ON" or "OFF")
+    AuraBtn.BackgroundColor3 = auraActive and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(120, 0, 0)
+    if not auraActive then stopAura() end
+end)
+
+-- Rest of UI Buttons (Multi, Clean, Auto [cite: 10, 11, 12])
 for _, partName in pairs(bodyParts) do
     local b = Instance.new("TextButton", DropdownFrame)
     b.Size = UDim2.new(1, 0, 0, 25)
@@ -215,25 +219,21 @@ for _, partName in pairs(bodyParts) do
 end
 
 DropdownBtn.MouseButton1Click:Connect(function() DropdownFrame.Visible = not DropdownFrame.Visible end)
-
 ToggleBtn.MouseButton1Click:Connect(function()
     autoHitActive = not autoHitActive
     ToggleBtn.Text = "AUTO: " .. (autoHitActive and "ON" or "OFF")
     ToggleBtn.BackgroundColor3 = autoHitActive and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(120, 0, 0)
 end)
-
 MultiTargetBtn.MouseButton1Click:Connect(function()
     multiTargetActive = not multiTargetActive
     MultiTargetBtn.Text = "MULTI: " .. (multiTargetActive and "ON" or "OFF")
     MultiTargetBtn.BackgroundColor3 = multiTargetActive and Color3.fromRGB(0, 150, 150) or Color3.fromRGB(100, 50, 0)
 end)
-
 MultToggle.MouseButton1Click:Connect(function()
     multActive = not multActive
     MultToggle.Text = "MULT: " .. (multActive and "ON" or "OFF")
     MultToggle.BackgroundColor3 = multActive and Color3.fromRGB(180, 0, 255) or Color3.fromRGB(70, 0, 100)
 end)
-
 CleanBtn.MouseButton1Click:Connect(function()
     local count = 0
     for _, obj in pairs(game.Workspace:GetDescendants()) do
@@ -246,53 +246,31 @@ CleanBtn.MouseButton1Click:Connect(function()
     task.delay(1.5, function() CleanBtn.Text = "Clean All 'Zones'" end)
 end)
 
-AuraBtn.MouseButton1Click:Connect(function()
-    auraActive = not auraActive
-    AuraBtn.Text = "Aura Farm: " .. (auraActive and "ON" or "OFF")
-    AuraBtn.BackgroundColor3 = auraActive and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(120, 0, 0)
-    
-    if not auraActive then
-        stopCurrentAnim()
-        playAnim(defaultIdleID)
-        task.wait(0.3)
-        stopCurrentAnim()
-    end
-end)
-
--- SHUTDOWN LOGIC
+-- SHUTDOWN LOGIC [cite: 13]
 CloseBtn.MouseButton1Click:Connect(function()
     autoHitActive = false
     multActive = false
     multiTargetActive = false
     isBlocking = false
     auraActive = false
-    stopCurrentAnim()
-    
-    for _, conn in pairs(connections) do 
-        if conn then conn:Disconnect() end 
-    end
+    stopAura()
+    for _, conn in pairs(connections) do if conn then conn:Disconnect() end end
     connections = {}
-    
     ScreenGui:Destroy()
     print("Script safely shut down.")
 end)
 
--- INPUT CONNECTIONS
+-- INPUT CONNECTIONS [cite: 14]
 table.insert(connections, UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        performAttack("lmb")
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then performAttack("lmb")
     elseif input.KeyCode == Enum.KeyCode.Q or input.KeyCode == Enum.KeyCode.E then
         if tick() - lastSpecial > 0.5 then
             lastSpecial = tick()
             performAttack("keypress", input.KeyCode == Enum.KeyCode.Q and "q" or "e")
         end
-    elseif input.KeyCode == Enum.KeyCode.F then
-        isBlocking = true
-        performAttack("keypress", "f")
-    elseif input.KeyCode == Enum.KeyCode.R then
-        performAttack("keypress", "r")
-    end
+    elseif input.KeyCode == Enum.KeyCode.F then isBlocking = true performAttack("keypress", "f")
+    elseif input.KeyCode == Enum.KeyCode.R then performAttack("keypress", "r") end
 end))
 
 table.insert(connections, UserInputService.InputEnded:Connect(function(input, gpe)
