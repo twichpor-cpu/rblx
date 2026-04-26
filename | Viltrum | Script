@@ -5,8 +5,10 @@ local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 
 local connections = {}
-local bodyParts = {"Head", "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg"}
+-- Added "Ratio" to the start of the list [cite: 1]
+local bodyParts = {"Ratio", "Head", "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg"}
 local selectedPart = "Torso"
+local hitRatio = 70 -- Default 70% headshot ratio
 
 -- LOGIC VARIABLES
 local autoHitActive = false
@@ -23,11 +25,11 @@ local defaultIdleID = "rbxassetid://115367110113662"
 
 -- GUI SETUP
 local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
-ScreenGui.Name = "CombatHelper_V12_Final"
+ScreenGui.Name = "CombatHelper_V12_Ratio"
 ScreenGui.ResetOnSpawn = false
 
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 220, 0, 320)
+MainFrame.Size = UDim2.new(0, 220, 0, 350) -- Slightly taller for ratio slider
 MainFrame.Position = UDim2.new(0.1, 0, 0.4, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.Active = true
@@ -35,7 +37,7 @@ MainFrame.Draggable = true
 
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(0.8, 0, 0.1, 0)
-Title.Text = "FISTS HELPER V12"
+Title.Text = "FISTS HELPER V12 + RATIO"
 Title.TextColor3 = Color3.new(1, 1, 1)
 Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 
@@ -46,9 +48,9 @@ CloseBtn.Text = "X"
 CloseBtn.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
 CloseBtn.TextColor3 = Color3.new(1, 1, 1)
 
--- UI BUTTONS (Auto-Hit, Multi, Clean, etc. [cite: 2, 3])
+-- UI COMPONENTS [cite: 2, 3]
 local MultInput = Instance.new("TextBox", MainFrame)
-MultInput.Size = UDim2.new(0.35, 0, 0.13, 0)
+MultInput.Size = UDim2.new(0.35, 0, 0.1, 0)
 MultInput.Position = UDim2.new(0.05, 0, 0.12, 0)
 MultInput.PlaceholderText = "Mult"
 MultInput.Text = "2"
@@ -56,57 +58,77 @@ MultInput.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 MultInput.TextColor3 = Color3.new(1, 1, 1)
 
 local MultToggle = Instance.new("TextButton", MainFrame)
-MultToggle.Size = UDim2.new(0.5, 0, 0.13, 0)
+MultToggle.Size = UDim2.new(0.5, 0, 0.1, 0)
 MultToggle.Position = UDim2.new(0.45, 0, 0.12, 0)
 MultToggle.Text = "MULT: OFF"
 MultToggle.BackgroundColor3 = Color3.fromRGB(70, 0, 100)
 MultToggle.TextColor3 = Color3.new(1, 1, 1)
 
 local ToggleBtn = Instance.new("TextButton", MainFrame)
-ToggleBtn.Size = UDim2.new(0.44, 0, 0.13, 0)
-ToggleBtn.Position = UDim2.new(0.05, 0, 0.27, 0)
+ToggleBtn.Size = UDim2.new(0.44, 0, 0.1, 0)
+ToggleBtn.Position = UDim2.new(0.05, 0, 0.23, 0)
 ToggleBtn.Text = "AUTO: OFF"
 ToggleBtn.BackgroundColor3 = Color3.fromRGB(100, 0, 0)
 ToggleBtn.TextColor3 = Color3.new(1, 1, 1)
 
 local MultiTargetBtn = Instance.new("TextButton", MainFrame)
-MultiTargetBtn.Size = UDim2.new(0.44, 0, 0.13, 0)
-MultiTargetBtn.Position = UDim2.new(0.51, 0, 0.27, 0)
+MultiTargetBtn.Size = UDim2.new(0.44, 0, 0.1, 0)
+MultiTargetBtn.Position = UDim2.new(0.51, 0, 0.23, 0)
 MultiTargetBtn.Text = "MULTI: OFF"
 MultiTargetBtn.BackgroundColor3 = Color3.fromRGB(100, 50, 0)
 MultiTargetBtn.TextColor3 = Color3.new(1, 1, 1)
 
 local CleanBtn = Instance.new("TextButton", MainFrame)
-CleanBtn.Size = UDim2.new(0.9, 0, 0.1, 0)
-CleanBtn.Position = UDim2.new(0.05, 0, 0.42, 0)
+CleanBtn.Size = UDim2.new(0.9, 0, 0.08, 0)
+CleanBtn.Position = UDim2.new(0.05, 0, 0.35, 0)
 CleanBtn.Text = "Clean All 'Zones'"
 CleanBtn.BackgroundColor3 = Color3.fromRGB(0, 70, 150)
 CleanBtn.TextColor3 = Color3.new(1, 1, 1)
 
 local AuraBtn = Instance.new("TextButton", MainFrame)
-AuraBtn.Size = UDim2.new(0.9, 0, 0.1, 0)
-AuraBtn.Position = UDim2.new(0.05, 0, 0.54, 0)
+AuraBtn.Size = UDim2.new(0.9, 0, 0.08, 0)
+AuraBtn.Position = UDim2.new(0.05, 0, 0.45, 0)
 AuraBtn.Text = "Aura Farm: OFF"
 AuraBtn.BackgroundColor3 = Color3.fromRGB(100, 0, 0)
 AuraBtn.TextColor3 = Color3.new(1, 1, 1)
 
 local DropdownBtn = Instance.new("TextButton", MainFrame)
-DropdownBtn.Size = UDim2.new(0.9, 0, 0.1, 0)
-DropdownBtn.Position = UDim2.new(0.05, 0, 0.66, 0)
+DropdownBtn.Size = UDim2.new(0.9, 0, 0.08, 0)
+DropdownBtn.Position = UDim2.new(0.05, 0, 0.55, 0)
 DropdownBtn.Text = "Target: " .. selectedPart
 DropdownBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 DropdownBtn.TextColor3 = Color3.new(1, 1, 1)
 
+-- NEW: RATIO SLIDER/INPUT
+local RatioFrame = Instance.new("Frame", MainFrame)
+RatioFrame.Size = UDim2.new(0.9, 0, 0.12, 0)
+RatioFrame.Position = UDim2.new(0.05, 0, 0.85, 0)
+RatioFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+RatioFrame.Visible = false
+
+local RatioLabel = Instance.new("TextLabel", RatioFrame)
+RatioLabel.Size = UDim2.new(1, 0, 0.5, 0)
+RatioLabel.Text = "Headshot Ratio: 70%"
+RatioLabel.TextColor3 = Color3.new(1, 1, 1)
+RatioLabel.BackgroundTransparency = 1
+
+local RatioInput = Instance.new("TextBox", RatioFrame)
+RatioInput.Size = UDim2.new(0.8, 0, 0.4, 0)
+RatioInput.Position = UDim2.new(0.1, 0, 0.5, 0)
+RatioInput.Text = "70"
+RatioInput.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+RatioInput.TextColor3 = Color3.new(1, 1, 1)
+
 local DropdownFrame = Instance.new("ScrollingFrame", MainFrame)
-DropdownFrame.Size = UDim2.new(0.9, 0, 0.3, 0)
-DropdownFrame.Position = UDim2.new(0.05, 0, 0.78, 0)
+DropdownFrame.Size = UDim2.new(0.9, 0, 0.2, 0)
+DropdownFrame.Position = UDim2.new(0.05, 0, 0.64, 0)
 DropdownFrame.Visible = false
 DropdownFrame.CanvasSize = UDim2.new(0, 0, 2, 0)
 DropdownFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 DropdownFrame.ZIndex = 5
 Instance.new("UIListLayout", DropdownFrame)
 
--- TARGETING & ATTACK ENGINE [cite: 5, 7, 8]
+-- TARGETING & ATTACK ENGINE [cite: 5, 8, 9]
 local function getTargets()
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return {} end
@@ -138,10 +160,18 @@ local function performAttack(actionType, val)
     if not remote then return end 
     local count = (actionType == "lmb" and multActive) and (tonumber(MultInput.Text) or 1) or 1
     remote:FireServer(actionType, val)
+ 
     if autoHitActive and not isBlocking then
         local targets = getTargets()
         for _, targetChar in pairs(targets) do
-            local targetPart = targetChar:FindFirstChild(selectedPart)
+            -- RATIO LOGIC INTEGRATION 
+            local finalPartName = selectedPart
+            if selectedPart == "Ratio" then
+                local roll = math.random(1, 100)
+                finalPartName = (roll <= hitRatio) and "Head" or "Torso"
+            end
+
+            local targetPart = targetChar:FindFirstChild(finalPartName)
             if targetPart then
                 for i = 1, count do
                     remote:FireServer("part", targetPart, targetPart.Position, Vector3.new(0, 0, 0))
@@ -151,7 +181,7 @@ local function performAttack(actionType, val)
     end
 end
 
--- ANIMATION LOGIC (Aura Farm [cite: 7])
+-- ANIMATION LOGIC [cite: 10, 11, 12]
 local function stopAura()
     if currentAnimTrack then
         currentAnimTrack:Stop(0.1)
@@ -173,37 +203,31 @@ local function playAura(id)
     end
 end
 
--- MOVEMENT FIX: Forces animation to stop if moving
 table.insert(connections, RunService.Heartbeat:Connect(function()
     local char = LocalPlayer.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not hum or not auraActive then return end
-
-    -- Check for any movement or jumping [cite: 1]
     local isMoving = hum.MoveDirection.Magnitude > 0
     local isJumping = hum:GetState() == Enum.HumanoidStateType.Jumping or hum:GetState() == Enum.HumanoidStateType.Freefall
-
     if isMoving or isJumping then
-        if currentAnimTrack and currentAnimTrack.IsPlaying then
-            stopAura()
-        end
+        if currentAnimTrack and currentAnimTrack.IsPlaying then stopAura() end
     else
-        -- Standing still, restart Aura if not playing
-        if not currentAnimTrack or not currentAnimTrack.IsPlaying then
-            playAura(auraAnimID)
-        end
+        if not currentAnimTrack or not currentAnimTrack.IsPlaying then playAura(auraAnimID) end
     end
 end))
 
--- UI LOGIC [cite: 9, 10, 11]
-AuraBtn.MouseButton1Click:Connect(function()
-    auraActive = not auraActive
-    AuraBtn.Text = "Aura Farm: " .. (auraActive and "ON" or "OFF")
-    AuraBtn.BackgroundColor3 = auraActive and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(120, 0, 0)
-    if not auraActive then stopAura() end
+-- UI LOGIC [cite: 13, 14, 15]
+RatioInput.FocusLost:Connect(function()
+    local val = tonumber(RatioInput.Text)
+    if val then
+        hitRatio = math.clamp(math.floor(val), 0, 100)
+        RatioInput.Text = tostring(hitRatio)
+        RatioLabel.Text = "Headshot Ratio: " .. hitRatio .. "%"
+    else
+        RatioInput.Text = tostring(hitRatio)
+    end
 end)
 
--- Rest of UI Buttons (Multi, Clean, Auto [cite: 10, 11, 12])
 for _, partName in pairs(bodyParts) do
     local b = Instance.new("TextButton", DropdownFrame)
     b.Size = UDim2.new(1, 0, 0, 25)
@@ -215,8 +239,17 @@ for _, partName in pairs(bodyParts) do
         selectedPart = partName
         DropdownBtn.Text = "Target: " .. partName
         DropdownFrame.Visible = false
+        -- Toggle Ratio slider visibility 
+        RatioFrame.Visible = (partName == "Ratio")
     end)
 end
+
+AuraBtn.MouseButton1Click:Connect(function()
+    auraActive = not auraActive
+    AuraBtn.Text = "Aura Farm: " .. (auraActive and "ON" or "OFF")
+    AuraBtn.BackgroundColor3 = auraActive and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(120, 0, 0)
+    if not auraActive then stopAura() end
+end)
 
 DropdownBtn.MouseButton1Click:Connect(function() DropdownFrame.Visible = not DropdownFrame.Visible end)
 ToggleBtn.MouseButton1Click:Connect(function()
@@ -224,16 +257,19 @@ ToggleBtn.MouseButton1Click:Connect(function()
     ToggleBtn.Text = "AUTO: " .. (autoHitActive and "ON" or "OFF")
     ToggleBtn.BackgroundColor3 = autoHitActive and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(120, 0, 0)
 end)
+
 MultiTargetBtn.MouseButton1Click:Connect(function()
     multiTargetActive = not multiTargetActive
     MultiTargetBtn.Text = "MULTI: " .. (multiTargetActive and "ON" or "OFF")
     MultiTargetBtn.BackgroundColor3 = multiTargetActive and Color3.fromRGB(0, 150, 150) or Color3.fromRGB(100, 50, 0)
 end)
+
 MultToggle.MouseButton1Click:Connect(function()
     multActive = not multActive
     MultToggle.Text = "MULT: " .. (multActive and "ON" or "OFF")
     MultToggle.BackgroundColor3 = multActive and Color3.fromRGB(180, 0, 255) or Color3.fromRGB(70, 0, 100)
 end)
+
 CleanBtn.MouseButton1Click:Connect(function()
     local count = 0
     for _, obj in pairs(game.Workspace:GetDescendants()) do
@@ -246,7 +282,6 @@ CleanBtn.MouseButton1Click:Connect(function()
     task.delay(1.5, function() CleanBtn.Text = "Clean All 'Zones'" end)
 end)
 
--- SHUTDOWN LOGIC [cite: 13]
 CloseBtn.MouseButton1Click:Connect(function()
     autoHitActive = false
     multActive = false
@@ -260,7 +295,7 @@ CloseBtn.MouseButton1Click:Connect(function()
     print("Script safely shut down.")
 end)
 
--- INPUT CONNECTIONS [cite: 14]
+-- INPUT CONNECTIONS [cite: 17, 18]
 table.insert(connections, UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
     if input.UserInputType == Enum.UserInputType.MouseButton1 then performAttack("lmb")
