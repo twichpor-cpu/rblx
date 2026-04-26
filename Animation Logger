@@ -1,0 +1,143 @@
+local Players = game:GetService("Players")
+local MarketplaceService = game:GetService("MarketplaceService")
+
+local player = Players.LocalPlayer
+local connections = {} 
+local recordedIds = {} 
+local isRecording = false
+
+-- UI Setup
+local ScreenGui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
+ScreenGui.Name = "DeepRecorder_v3"
+ScreenGui.ResetOnSpawn = false
+
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0, 220, 0, 110)
+MainFrame.Position = UDim2.new(0.5, -110, 0.8, -60)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+
+local ActionButton = Instance.new("TextButton", MainFrame)
+ActionButton.Size = UDim2.new(0.9, 0, 0, 45)
+ActionButton.Position = UDim2.new(0.05, 0, 0.45, 0)
+ActionButton.BackgroundColor3 = Color3.fromRGB(55, 55, 65)
+ActionButton.Text = "START RECORDING"
+ActionButton.TextColor3 = Color3.new(1, 1, 1)
+ActionButton.Font = Enum.Font.GothamBold
+ActionButton.TextSize = 14
+
+local Title = Instance.new("TextLabel", MainFrame)
+Title.Size = UDim2.new(1, 0, 0, 30)
+Title.BackgroundTransparency = 1
+Title.Text = "ANIMATION LOGGER"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 12
+
+local Status = Instance.new("TextLabel", MainFrame)
+Status.Size = UDim2.new(1, 0, 0, 20)
+Status.Position = UDim2.new(0, 0, 0.25, 0)
+Status.BackgroundTransparency = 1
+Status.Text = "Ready"
+Status.TextColor3 = Color3.fromRGB(150, 150, 150)
+Status.Font = Enum.Font.Gotham
+Status.TextSize = 10
+
+Instance.new("UICorner", MainFrame)
+Instance.new("UICorner", ActionButton)
+
+-- Logic from your snippet: Filters out default IDs
+local function isDefault(id)
+    return string.find(id, "507768375") or string.find(id, "180435571")
+end
+
+local function logAnimation(track)
+    if not track or not track.Animation then return end
+    local id = tostring(track.Animation.AnimationId)
+    
+    if id ~= "" and not recordedIds[id] and not isDefault(id) then
+        recordedIds[id] = true
+        local assetId = id:match("%d+")
+        
+        print("Captured: " .. id)
+        
+        if assetId then
+            task.spawn(function()
+                local success, result = pcall(function()
+                    return MarketplaceService:GetProductInfo(tonumber(assetId)).Name
+                end)
+                local name = success and result or "Unknown"
+                -- Store with name for the clipboard
+                recordedIds[id] = name 
+            end)
+        end
+    end
+end
+
+-- Hook function to find Animators in Tools/Fists
+local function hook(obj)
+    if obj:IsA("Animator") then
+        table.insert(connections, obj.AnimationPlayed:Connect(logAnimation))
+        
+        -- Catch animations already playing on this animator
+        local p = obj.Parent
+        if p and (p:IsA("Humanoid") or p:IsA("AnimationController")) then
+            for _, track in pairs(p:GetPlayingAnimationTracks()) do
+                logAnimation(track)
+            end
+        end
+    end
+end
+
+local function toggle()
+    isRecording = not isRecording
+    
+    if isRecording then
+        recordedIds = {}
+        ActionButton.Text = "STOP & COPY"
+        ActionButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+        Status.Text = "RECORDING ACTIVE"
+        
+        if player.Character then
+            -- Scan existing character parts and items
+            for _, d in pairs(player.Character:GetDescendants()) do hook(d) end
+            
+            -- Watch for the "Fists" or other items being equipped/added
+            table.insert(connections, player.Character.DescendantAdded:Connect(function(d)
+                task.wait(0.1) -- Wait for tool to initialize
+                hook(d)
+                if d:IsA("Tool") then
+                    for _, sub in pairs(d:GetDescendants()) do hook(sub) end
+                end
+            end))
+        end
+    else
+        ActionButton.Text = "START RECORDING"
+        ActionButton.BackgroundColor3 = Color3.fromRGB(55, 55, 65)
+        
+        -- Disconnect all listeners
+        for _, c in pairs(connections) do c:Disconnect() end
+        connections = {}
+        
+        -- Build clipboard string
+        local report = "--- Animations Recorded ---\n"
+        local count = 0
+        for id, name in pairs(recordedIds) do
+            report = report .. "\nName: " .. tostring(name) .. "\nID: " .. id .. "\n"
+            count = count + 1
+        end
+        
+        if count > 0 then
+            setclipboard(report) -- or toClipboard(report)
+            Status.Text = "Copied " .. count .. " animations!"
+        else
+            Status.Text = "No animations found."
+        end
+        
+        task.delay(3, function() Status.Text = "Ready" end)
+    end
+end
+
+ActionButton.MouseButton1Click:Connect(toggle)
