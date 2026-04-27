@@ -15,39 +15,45 @@ local multActive = false
 local multiTargetActive = false
 local isBlocking = false
 local lastSpecial = 0
-local zonesDisabled = false -- Track toggle state
+local zonesDisabled = false
 
--- TARGET LOCK VARIABLES
-local lockedTarget = nil
-local lockTimer = 0
-local LOCK_DURATION = 5
+-- AUTO PARRY VARIABLES
+local autoParryEnabled = false
+local lastParry = 0
+local lastLimbPositions = {}
+local TRACK_RANGE = 17 
+local PARRY_RANGE = 3.5 
+local VERTICAL_LIMIT = 1.5 
+local RUSH_VELOCITY = 25 
+local LOOK_THRESHOLD = 0.5 
+local DELTA_THRESHOLD = 0.55 
+local PARRY_COOLDOWN = 0.35
 
 -- AURA FARM VARIABLES
 local auraActive = false
 local currentAnimTrack = nil
 local auraAnimID = "rbxassetid://125469815548571"
-local defaultIdleID = "rbxassetid://115367110113662"
 
 -- GUI SETUP
 local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
-ScreenGui.Name = "CombatHelper_V13_Final"
+ScreenGui.Name = "Viltrum_V15_Final"
 ScreenGui.ResetOnSpawn = false
 
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 220, 0, 350)
-MainFrame.Position = UDim2.new(0.1, 0, 0.4, 0)
+MainFrame.Size = UDim2.new(0, 220, 0, 420) -- Increased size for new button
+MainFrame.Position = UDim2.new(0.1, 0, 0.3, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.Active = true
 MainFrame.Draggable = true
 
 local Title = Instance.new("TextLabel", MainFrame)
-Title.Size = UDim2.new(0.8, 0, 0.1, 0)
-Title.Text = "FISTS HELPER V13"
+Title.Size = UDim2.new(0.8, 0, 0.08, 0)
+Title.Text = "VILTRUM HELPER V15"
 Title.TextColor3 = Color3.new(1, 1, 1)
 Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 
 local CloseBtn = Instance.new("TextButton", MainFrame)
-CloseBtn.Size = UDim2.new(0.2, 0, 0.1, 0)
+CloseBtn.Size = UDim2.new(0.2, 0, 0.08, 0)
 CloseBtn.Position = UDim2.new(0.8, 0, 0, 0)
 CloseBtn.Text = "X"
 CloseBtn.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
@@ -55,60 +61,67 @@ CloseBtn.TextColor3 = Color3.new(1, 1, 1)
 
 -- UI COMPONENTS 
 local MultInput = Instance.new("TextBox", MainFrame)
-MultInput.Size = UDim2.new(0.35, 0, 0.1, 0)
-MultInput.Position = UDim2.new(0.05, 0, 0.12, 0)
+MultInput.Size = UDim2.new(0.35, 0, 0.08, 0)
+MultInput.Position = UDim2.new(0.05, 0, 0.1, 0)
 MultInput.PlaceholderText = "Mult"
 MultInput.Text = "2"
 MultInput.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 MultInput.TextColor3 = Color3.new(1, 1, 1)
 
 local MultToggle = Instance.new("TextButton", MainFrame)
-MultToggle.Size = UDim2.new(0.5, 0, 0.1, 0)
-MultToggle.Position = UDim2.new(0.45, 0, 0.12, 0)
+MultToggle.Size = UDim2.new(0.5, 0, 0.08, 0)
+MultToggle.Position = UDim2.new(0.45, 0, 0.1, 0)
 MultToggle.Text = "MULT: OFF"
 MultToggle.BackgroundColor3 = Color3.fromRGB(70, 0, 100)
 MultToggle.TextColor3 = Color3.new(1, 1, 1)
 
 local ToggleBtn = Instance.new("TextButton", MainFrame)
-ToggleBtn.Size = UDim2.new(0.44, 0, 0.1, 0)
-ToggleBtn.Position = UDim2.new(0.05, 0, 0.23, 0)
+ToggleBtn.Size = UDim2.new(0.44, 0, 0.08, 0)
+ToggleBtn.Position = UDim2.new(0.05, 0, 0.2, 0)
 ToggleBtn.Text = "AUTO: OFF"
 ToggleBtn.BackgroundColor3 = Color3.fromRGB(100, 0, 0)
 ToggleBtn.TextColor3 = Color3.new(1, 1, 1)
 
 local MultiTargetBtn = Instance.new("TextButton", MainFrame)
-MultiTargetBtn.Size = UDim2.new(0.44, 0, 0.1, 0)
-MultiTargetBtn.Position = UDim2.new(0.51, 0, 0.23, 0)
+MultiTargetBtn.Size = UDim2.new(0.44, 0, 0.08, 0)
+MultiTargetBtn.Position = UDim2.new(0.51, 0, 0.2, 0)
 MultiTargetBtn.Text = "MULTI: OFF"
 MultiTargetBtn.BackgroundColor3 = Color3.fromRGB(100, 50, 0)
 MultiTargetBtn.TextColor3 = Color3.new(1, 1, 1)
 
+local ParryToggleBtn = Instance.new("TextButton", MainFrame)
+ParryToggleBtn.Size = UDim2.new(0.9, 0, 0.08, 0)
+ParryToggleBtn.Position = UDim2.new(0.05, 0, 0.3, 0)
+ParryToggleBtn.Text = "AUTO PARRY: OFF"
+ParryToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+ParryToggleBtn.TextColor3 = Color3.new(1, 1, 1)
+
 local CleanBtn = Instance.new("TextButton", MainFrame)
 CleanBtn.Size = UDim2.new(0.9, 0, 0.08, 0)
-CleanBtn.Position = UDim2.new(0.05, 0, 0.35, 0)
+CleanBtn.Position = UDim2.new(0.05, 0, 0.4, 0)
 CleanBtn.Text = "ZONES: ENABLED"
 CleanBtn.BackgroundColor3 = Color3.fromRGB(120, 0, 0)
 CleanBtn.TextColor3 = Color3.new(1, 1, 1)
 
 local AuraBtn = Instance.new("TextButton", MainFrame)
 AuraBtn.Size = UDim2.new(0.9, 0, 0.08, 0)
-AuraBtn.Position = UDim2.new(0.05, 0, 0.45, 0)
+AuraBtn.Position = UDim2.new(0.05, 0, 0.5, 0)
 AuraBtn.Text = "Aura Farm: OFF"
 AuraBtn.BackgroundColor3 = Color3.fromRGB(100, 0, 0)
 AuraBtn.TextColor3 = Color3.new(1, 1, 1)
 
 local DropdownBtn = Instance.new("TextButton", MainFrame)
 DropdownBtn.Size = UDim2.new(0.9, 0, 0.08, 0)
-DropdownBtn.Position = UDim2.new(0.05, 0, 0.55, 0)
+DropdownBtn.Position = UDim2.new(0.05, 0, 0.6, 0)
 DropdownBtn.Text = "Target: " .. selectedPart
 DropdownBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 DropdownBtn.TextColor3 = Color3.new(1, 1, 1)
 
+-- RATIO SLIDER/INPUT
 local RatioFrame = Instance.new("Frame", MainFrame)
 RatioFrame.Size = UDim2.new(0.9, 0, 0.12, 0)
 RatioFrame.Position = UDim2.new(0.05, 0, 0.85, 0)
 RatioFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-RatioFrame.Visible = true
 
 local RatioLabel = Instance.new("TextLabel", RatioFrame)
 RatioLabel.Size = UDim2.new(1, 0, 0.5, 0)
@@ -125,97 +138,110 @@ RatioInput.TextColor3 = Color3.new(1, 1, 1)
 
 local DropdownFrame = Instance.new("ScrollingFrame", MainFrame)
 DropdownFrame.Size = UDim2.new(0.9, 0, 0.2, 0)
-DropdownFrame.Position = UDim2.new(0.05, 0, 0.64, 0)
+DropdownFrame.Position = UDim2.new(0.05, 0, 0.69, 0)
 DropdownFrame.Visible = false
 DropdownFrame.CanvasSize = UDim2.new(0, 0, 2, 0)
 DropdownFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 DropdownFrame.ZIndex = 5
 Instance.new("UIListLayout", DropdownFrame)
 
--- HELPER: UPDATE LOCK
-local function updateLock(target)
-    if target and target:FindFirstChild("Humanoid") and target.Humanoid.Health > 0 then
-        lockedTarget = target
-        lockTimer = tick()
-    end
+-- PARRY COOLDOWN HELPERS (USING ABSOLUTESIZE)
+local function getParryState()
+    local char = LocalPlayer.Character
+    local fists = char and char:FindFirstChild("Fists") or LocalPlayer.Backpack:FindFirstChild("Fists")
+    if not fists then return "none" end
+    local gui = fists:FindFirstChild("fistgui")
+    local lb = gui and gui:FindFirstChild("bars") and gui.bars:FindFirstChild("counterbars") and gui.bars.counterbars:FindFirstChild("behindbar") and gui.bars.counterbars.behindbar:FindFirstChild("loadbar")
+    return (lb and lb.AbsoluteSize.Y > 5) and "cooldown" or "ready"
 end
 
--- TARGETING LOGIC (ENHANCED WITH NAME KEEPER / LOCK)
+local function getBlockState()
+    local char = LocalPlayer.Character
+    local fists = char and char:FindFirstChild("Fists") or LocalPlayer.Backpack:FindFirstChild("Fists")
+    if not fists then return "none" end
+    local gui = fists:FindFirstChild("fistgui")
+    local bb = gui and gui:FindFirstChild("bars") and gui.bars:FindFirstChild("blockbars") and gui.bars.blockbars:FindFirstChild("behindbar") and gui.bars.blockbars.behindbar:FindFirstChild("loadbar")
+    return (bb and bb.AbsoluteSize.Y > 5) and "cooldown" or "ready"
+end
+
+-- TARGETING & ATTACK ENGINE
 local function getTargets()
     local char = LocalPlayer.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
     if not root then return {} end
-
-    local maxDist = 17
+    local maxDist = 12
     local found = {}
-    local potentialTargets = {}
-
-    -- Check if existing lock is still valid (Time and Health only)
-    if lockedTarget then
-        local targetHum = lockedTarget:FindFirstChild("Humanoid")
-        
-        -- Reset lock ONLY if 5s passed or target died
-        if tick() - lockTimer > LOCK_DURATION or (targetHum and targetHum.Health <= 0) then
-            lockedTarget = nil
-        end
-    end
-
-    -- Find parts within radius sphere
     local params = OverlapParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
     params.FilterDescendantsInstances = {char}
-    
     local nearbyParts = workspace:GetPartBoundsInRadius(root.Position, maxDist, params)
-
+    local potentialTargets = {}
     for _, part in ipairs(nearbyParts) do
         local model = part.Parent
         if model and model:FindFirstChild("Humanoid") and model:FindFirstChild("HumanoidRootPart") then
-            if not potentialTargets[model] then
-                potentialTargets[model] = model.HumanoidRootPart
-            end
+            if not potentialTargets[model] then potentialTargets[model] = model.HumanoidRootPart end
         end
     end
-
     if multiTargetActive then
         for model, _ in pairs(potentialTargets) do table.insert(found, model) end
     else
-        -- If we have a valid locked target, stick to them even if they are outside the 12-stud radius
-        -- (This allows "Remote-based" persistence even if the radius detection misses them temporarily)
-        if lockedTarget then
-            table.insert(found, lockedTarget)
-        else
-            -- Otherwise, find a new target based on LookVector (Front facing)
-            local bestTarget = nil
-            local highestDot = -1
-
-            for model, targetRoot in pairs(potentialTargets) do
-                local directionToTarget = (targetRoot.Position - root.Position).Unit
-                local lookDirection = root.CFrame.LookVector
-                local dot = lookDirection:Dot(directionToTarget)
-
-                if dot > highestDot then
-                    highestDot = dot
-                    bestTarget = model
-                end
-            end
-            
-            if bestTarget then 
-                table.insert(found, bestTarget)
-                updateLock(bestTarget) -- Set the lock for 5s
-            end
+        local bestTarget = nil
+        local highestDot = -1
+        for model, targetRoot in pairs(potentialTargets) do
+            local dot = root.CFrame.LookVector:Dot((targetRoot.Position - root.Position).Unit)
+            if dot > highestDot then highestDot = dot bestTarget = model end
         end
+        if bestTarget then table.insert(found, bestTarget) end
     end
-
     return found
 end
 
-local function stopAura()
-    if currentAnimTrack then
-        currentAnimTrack:Stop(0.2)
-        currentAnimTrack = nil
+local function performAttack(actionType, val)
+    local char = LocalPlayer.Character
+    local remote = char and char:FindFirstChild("Fists") and char.Fists:FindFirstChild("fistremote")
+    if not remote then return end 
+    local isSpecialKey = (actionType == "keypress" and (val == "q" or val == "e"))
+    local count = ((actionType == "lmb" or isSpecialKey) and multActive) and (tonumber(MultInput.Text) or 1) or 1
+    remote:FireServer(actionType, val)
+    if autoHitActive and not isBlocking then
+        local targets = getTargets()
+        for _, targetChar in pairs(targets) do
+            if targetChar and targetChar:FindFirstChild("Humanoid") and targetChar.Humanoid.Health > 0 then
+                local finalPartName = (selectedPart == "Ratio") and ((math.random(1, 100) <= hitRatio) and "Head" or "Torso") or selectedPart
+                local targetPart = targetChar:FindFirstChild(finalPartName)
+                if targetPart then
+                    for i = 1, count do remote:FireServer("part", targetPart, targetPart.Position, Vector3.new(0,0,0)) end
+                end
+            end
+        end
     end
 end
 
+-- PARRY TRIGGER
+local function triggerParry()
+    if not autoParryEnabled or tick() - lastParry < PARRY_COOLDOWN then return end
+    local char = LocalPlayer.Character
+    local fists = char and char:FindFirstChild("Fists") or LocalPlayer.Backpack:FindFirstChild("Fists")
+    if not fists then return end
+    local remote = fists:FindFirstChild("fistremote")
+    if remote then
+        if getParryState() == "ready" then
+            lastParry = tick()
+            remote:FireServer("keypress", "r")
+            ParryToggleBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 0)
+        elseif getBlockState() == "ready" then
+            lastParry = tick()
+            remote:FireServer("keypress", "f")
+            ParryToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 255, 255)
+        end
+        task.delay(0.1, function()
+            ParryToggleBtn.BackgroundColor3 = autoParryEnabled and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(150, 0, 0)
+        end)
+    end
+end
+
+-- AURA HANDLERS
+local function stopAura() if currentAnimTrack then currentAnimTrack:Stop(0.2) currentAnimTrack = nil end end
 local function playAura(id)
     local char = LocalPlayer.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -230,168 +256,97 @@ local function playAura(id)
     end
 end
 
-local function performAttack(actionType, val)
+-- MAIN BACKGROUND LOOPS
+table.insert(connections, RunService.Heartbeat:Connect(function()
+    -- AURA LOGIC
     local char = LocalPlayer.Character
-    local remote = char and char:FindFirstChild("Fists") and char.Fists:FindFirstChild("fistremote")
-    if not remote then return end 
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if hum and root and auraActive then
+        local isMoving = root.AssemblyLinearVelocity.Magnitude > 0.5 or hum.MoveDirection.Magnitude > 0 or hum.FloorMaterial == Enum.Material.Air
+        if isMoving then if currentAnimTrack then stopAura() end
+        else if not currentAnimTrack then playAura(auraAnimID) end end
+    end
 
-    local isSpecialKey = (actionType == "keypress" and (val == "q" or val == "e"))
-    local useMult = (actionType == "lmb" or isSpecialKey) and multActive
-    local count = useMult and (tonumber(MultInput.Text) or 1) or 1
-    
-    remote:FireServer(actionType, val)
-
-    if autoHitActive and not isBlocking then
-        local targets = getTargets()
-        for _, targetChar in pairs(targets) do
-            if targetChar and targetChar:FindFirstChild("Humanoid") and targetChar.Humanoid.Health > 0 then
-                -- Refresh the lock timer on every hit
-                updateLock(targetChar)
-
-                local finalPartName = selectedPart
-                if selectedPart == "Ratio" then
-                    local roll = math.random(1, 100)
-                    finalPartName = (roll <= hitRatio) and "Head" or "Torso"
-                end
-
-                local targetPart = targetChar:FindFirstChild(finalPartName)
-                if targetPart then
-                    for i = 1, count do
-                        remote:FireServer("part", targetPart, targetPart.Position, Vector3.new(0, 0, 0))
+    -- AUTO PARRY LOGIC
+    if not autoParryEnabled or not root then return end
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local eChar = player.Character
+            local eRoot = eChar:FindFirstChild("HumanoidRootPart")
+            if eRoot and eChar:FindFirstChild("Fists") then
+                local offset = eRoot.Position - root.Position
+                local dist = offset.Magnitude
+                if dist < TRACK_RANGE and math.abs(offset.Y) <= VERTICAL_LIMIT then
+                    -- RUSH CHECK
+                    if dist < PARRY_RANGE and eRoot.AssemblyLinearVelocity.Magnitude > RUSH_VELOCITY then
+                        triggerParry()
+                    end
+                    -- SNAP CHECK
+                    local dot = eRoot.CFrame.LookVector:Dot(-offset.Unit)
+                    if dot > LOOK_THRESHOLD then
+                        for _, name in pairs({"Right Arm", "Left Arm"}) do
+                            local limb = eChar:FindFirstChild(name)
+                            if limb then
+                                local relCF = eRoot.CFrame:ToObjectSpace(limb.CFrame)
+                                local key = player.UserId .. name
+                                if lastLimbPositions[key] and (relCF.Position - lastLimbPositions[key].Position).Magnitude > DELTA_THRESHOLD then
+                                    if dist < PARRY_RANGE then triggerParry() break end
+                                end
+                                lastLimbPositions[key] = relCF
+                            end
+                        end
                     end
                 end
             end
         end
     end
-end
-
--- AUTO-REALIATE / COUNTER-LOCK
-local function setupCounterLock()
-    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local hum = char:WaitForChild("Humanoid")
-    
-    table.insert(connections, hum.HealthChanged:Connect(function(health)
-        local tag = hum:FindFirstChild("creator") or hum:FindFirstChild("Attacker")
-        if tag and tag.Value and tag.Value:IsA("Player") and tag.Value.Character then
-            updateLock(tag.Value.Character)
-        end
-    end))
-end
-
--- AURA FARM HEARTBEAT
-table.insert(connections, RunService.Heartbeat:Connect(function()
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    
-    if not hum or not root or not auraActive then return end
-    
-    local isMovingPhysically = root.AssemblyLinearVelocity.Magnitude > 0.5
-    local isInputMoving = hum.MoveDirection.Magnitude > 0
-    local isAirborne = hum.FloorMaterial == Enum.Material.Air
-    
-    if isInputMoving or isMovingPhysically or isAirborne then
-        if currentAnimTrack and currentAnimTrack.IsPlaying then stopAura() end
-    else
-        if not currentAnimTrack or not currentAnimTrack.IsPlaying then playAura(auraAnimID) end
-    end
 end))
 
--- UI EVENTS
-RatioInput.FocusLost:Connect(function()
-    local val = tonumber(RatioInput.Text)
-    if val then
-        hitRatio = math.clamp(math.floor(val), 0, 100)
-        RatioInput.Text = tostring(hitRatio)
-        RatioLabel.Text = "Headshot Ratio: " .. hitRatio .. "%"
-    else
-        RatioInput.Text = tostring(hitRatio)
-    end
+-- UI CLICK EVENTS
+ParryToggleBtn.MouseButton1Click:Connect(function()
+    autoParryEnabled = not autoParryEnabled
+    ParryToggleBtn.Text = "AUTO PARRY: " .. (autoParryEnabled and "ON" or "OFF")
+    ParryToggleBtn.BackgroundColor3 = autoParryEnabled and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(150, 0, 0)
 end)
 
-for _, partName in pairs(bodyParts) do
+RatioInput.FocusLost:Connect(function()
+    hitRatio = math.clamp(tonumber(RatioInput.Text) or hitRatio, 0, 100)
+    RatioInput.Text, RatioLabel.Text = tostring(hitRatio), "Headshot Ratio: " .. hitRatio .. "%"
+end)
+
+for _, p in pairs(bodyParts) do
     local b = Instance.new("TextButton", DropdownFrame)
-    b.Size = UDim2.new(1, 0, 0, 25)
-    b.Text = partName
-    b.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    b.TextColor3 = Color3.new(1, 1, 1)
-    b.ZIndex = 6
-    b.MouseButton1Click:Connect(function()
-        selectedPart = partName
-        DropdownBtn.Text = "Target: " .. partName
-        DropdownFrame.Visible = false
-        RatioFrame.Visible = (partName == "Ratio")
-    end)
+    b.Size, b.Text, b.BackgroundColor3, b.TextColor3, b.ZIndex = UDim2.new(1,0,0,25), p, Color3.fromRGB(30,30,30), Color3.new(1,1,1), 6
+    b.MouseButton1Click:Connect(function() selectedPart = p DropdownBtn.Text = "Target: "..p DropdownFrame.Visible, RatioFrame.Visible = false, (p == "Ratio") end)
 end
 
-AuraBtn.MouseButton1Click:Connect(function()
-    auraActive = not auraActive
-    AuraBtn.Text = "Aura Farm: " .. (auraActive and "ON" or "OFF")
-    AuraBtn.BackgroundColor3 = auraActive and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(120, 0, 0)
-    if not auraActive then stopAura() end
-end)
-
-ToggleBtn.MouseButton1Click:Connect(function()
-    autoHitActive = not autoHitActive
-    ToggleBtn.Text = "AUTO: " .. (autoHitActive and "ON" or "OFF")
-    ToggleBtn.BackgroundColor3 = autoHitActive and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(120, 0, 0)
-end)
-
-MultiTargetBtn.MouseButton1Click:Connect(function()
-    multiTargetActive = not multiTargetActive
-    MultiTargetBtn.Text = "MULTI: " .. (multiTargetActive and "ON" or "OFF")
-    MultiTargetBtn.BackgroundColor3 = multiTargetActive and Color3.fromRGB(0, 150, 150) or Color3.fromRGB(100, 50, 0)
-end)
-
-MultToggle.MouseButton1Click:Connect(function()
-    multActive = not multActive
-    MultToggle.Text = "MULT: " .. (multActive and "ON" or "OFF")
-    MultToggle.BackgroundColor3 = multActive and Color3.fromRGB(180, 0, 255) or Color3.fromRGB(70, 0, 100)
-end)
+AuraBtn.MouseButton1Click:Connect(function() auraActive = not auraActive AuraBtn.Text = "Aura Farm: "..(auraActive and "ON" or "OFF") AuraBtn.BackgroundColor3 = auraActive and Color3.fromRGB(0,120,0) or Color3.fromRGB(120,0,0) if not auraActive then stopAura() end end)
+DropdownBtn.MouseButton1Click:Connect(function() DropdownFrame.Visible = not DropdownFrame.Visible end)
+ToggleBtn.MouseButton1Click:Connect(function() autoHitActive = not autoHitActive ToggleBtn.Text = "AUTO: "..(autoHitActive and "ON" or "OFF") ToggleBtn.BackgroundColor3 = autoHitActive and Color3.fromRGB(0,120,0) or Color3.fromRGB(120,0,0) end)
+MultiTargetBtn.MouseButton1Click:Connect(function() multiTargetActive = not multiTargetActive MultiTargetBtn.Text = "MULTI: "..(multiTargetActive and "ON" or "OFF") MultiTargetBtn.BackgroundColor3 = multiTargetActive and Color3.fromRGB(0,150,150) or Color3.fromRGB(100,50,0) end)
+MultToggle.MouseButton1Click:Connect(function() multActive = not multActive MultToggle.Text = "MULT: "..(multActive and "ON" or "OFF") MultToggle.BackgroundColor3 = multActive and Color3.fromRGB(180,0,255) or Color3.fromRGB(70,0,100) end)
 
 CleanBtn.MouseButton1Click:Connect(function()
     zonesDisabled = not zonesDisabled
-    local targetState = not zonesDisabled
-    for _, obj in pairs(game.Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and (string.find(string.lower(obj.Name), "zone") or obj:FindFirstChildOfClass("TouchInterest")) then
-            obj.CanTouch = targetState
-        end
-    end
-    CleanBtn.Text = zonesDisabled and "ZONES: DISABLED" or "ZONES: ENABLED"
-    CleanBtn.BackgroundColor3 = zonesDisabled and Color3.fromRGB(0, 0, 120) or Color3.fromRGB(0, 120, 0)
+    for _, obj in pairs(workspace:GetDescendants()) do if obj:IsA("BasePart") and (string.find(string.lower(obj.Name), "zone") or obj:FindFirstChildOfClass("TouchInterest")) then obj.CanTouch = not zonesDisabled end end
+    CleanBtn.Text, CleanBtn.BackgroundColor3 = zonesDisabled and "ZONES: DISABLED" or "ZONES: ENABLED", zonesDisabled and Color3.fromRGB(0,0,120) or Color3.fromRGB(0,120,0)
 end)
 
 CloseBtn.MouseButton1Click:Connect(function()
-    autoHitActive = false
-    auraActive = false
+    for _, conn in pairs(connections) do conn:Disconnect() end
     stopAura()
-    for _, obj in pairs(game.Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and (string.find(string.lower(obj.Name), "zone") or obj:FindFirstChildOfClass("TouchInterest")) then
-            obj.CanTouch = true
-        end
-    end
-    for _, conn in pairs(connections) do if conn then conn:Disconnect() end end
     ScreenGui:Destroy()
 end)
 
-table.insert(connections, UserInputService.InputBegan:Connect(function(input, gpe)
-    if gpe then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then performAttack("lmb")
-    elseif input.KeyCode == Enum.KeyCode.Q or input.KeyCode == Enum.KeyCode.E then
-        if tick() - lastSpecial > 0.5 then
-            lastSpecial = tick()
-            performAttack("keypress", input.KeyCode == Enum.KeyCode.Q and "q" or "e")
-        end
-    elseif input.KeyCode == Enum.KeyCode.F then isBlocking = true performAttack("keypress", "f")
-    elseif input.KeyCode == Enum.KeyCode.R then performAttack("keypress", "r") end
+table.insert(connections, UserInputService.InputBegan:Connect(function(i, g)
+    if g then return end
+    if i.UserInputType == Enum.UserInputType.MouseButton1 then performAttack("lmb")
+    elseif i.KeyCode == Enum.KeyCode.Q or i.KeyCode == Enum.KeyCode.E then if tick()-lastSpecial > 0.5 then lastSpecial = tick() performAttack("keypress", i.KeyCode == Enum.KeyCode.Q and "q" or "e") end
+    elseif i.KeyCode == Enum.KeyCode.F then isBlocking = true performAttack("keypress", "f")
+    elseif i.KeyCode == Enum.KeyCode.R then performAttack("keypress", "r") end
 end))
 
-table.insert(connections, UserInputService.InputEnded:Connect(function(input, gpe)
-    if input.KeyCode == Enum.KeyCode.F then isBlocking = false end
-end))
+table.insert(connections, UserInputService.InputEnded:Connect(function(i) if i.KeyCode == Enum.KeyCode.F then isBlocking = false end end))
 
-DropdownBtn.MouseButton1Click:Connect(function() DropdownFrame.Visible = not DropdownFrame.Visible end)
-
--- INITIALIZE
-setupCounterLock()
-LocalPlayer.CharacterAdded:Connect(setupCounterLock)
+warn("VILTRUM V15 LOADED: Integrated Hybrid Auto-Parry")
