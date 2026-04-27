@@ -5,10 +5,9 @@ local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 
 local connections = {}
--- Added "Ratio" to the start of the list [cite: 1]
 local bodyParts = {"Ratio", "Head", "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg"}
-local selectedPart = "Torso"
-local hitRatio = 35 -- Default 35% headshot ratio
+local selectedPart = "Ratio"
+local hitRatio = 35 
 
 -- LOGIC VARIABLES
 local autoHitActive = false
@@ -16,6 +15,12 @@ local multActive = false
 local multiTargetActive = false
 local isBlocking = false
 local lastSpecial = 0
+local zonesDisabled = false -- Track toggle state
+
+-- TARGET LOCK VARIABLES
+local lockedTarget = nil
+local lockTimer = 0
+local LOCK_DURATION = 5
 
 -- AURA FARM VARIABLES
 local auraActive = false
@@ -25,11 +30,11 @@ local defaultIdleID = "rbxassetid://115367110113662"
 
 -- GUI SETUP
 local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
-ScreenGui.Name = "CombatHelper_V12_Ratio"
+ScreenGui.Name = "CombatHelper_V13_Final"
 ScreenGui.ResetOnSpawn = false
 
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 220, 0, 350) -- Slightly taller for ratio slider
+MainFrame.Size = UDim2.new(0, 220, 0, 350)
 MainFrame.Position = UDim2.new(0.1, 0, 0.4, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.Active = true
@@ -48,7 +53,7 @@ CloseBtn.Text = "X"
 CloseBtn.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
 CloseBtn.TextColor3 = Color3.new(1, 1, 1)
 
--- UI COMPONENTS [cite: 2, 3]
+-- UI COMPONENTS 
 local MultInput = Instance.new("TextBox", MainFrame)
 MultInput.Size = UDim2.new(0.35, 0, 0.1, 0)
 MultInput.Position = UDim2.new(0.05, 0, 0.12, 0)
@@ -81,8 +86,8 @@ MultiTargetBtn.TextColor3 = Color3.new(1, 1, 1)
 local CleanBtn = Instance.new("TextButton", MainFrame)
 CleanBtn.Size = UDim2.new(0.9, 0, 0.08, 0)
 CleanBtn.Position = UDim2.new(0.05, 0, 0.35, 0)
-CleanBtn.Text = "Clean All 'Zones'"
-CleanBtn.BackgroundColor3 = Color3.fromRGB(0, 70, 150)
+CleanBtn.Text = "ZONES: ENABLED"
+CleanBtn.BackgroundColor3 = Color3.fromRGB(120, 0, 0)
 CleanBtn.TextColor3 = Color3.new(1, 1, 1)
 
 local AuraBtn = Instance.new("TextButton", MainFrame)
@@ -99,12 +104,11 @@ DropdownBtn.Text = "Target: " .. selectedPart
 DropdownBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 DropdownBtn.TextColor3 = Color3.new(1, 1, 1)
 
--- NEW: RATIO SLIDER/INPUT
 local RatioFrame = Instance.new("Frame", MainFrame)
 RatioFrame.Size = UDim2.new(0.9, 0, 0.12, 0)
 RatioFrame.Position = UDim2.new(0.05, 0, 0.85, 0)
 RatioFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-RatioFrame.Visible = false
+RatioFrame.Visible = true
 
 local RatioLabel = Instance.new("TextLabel", RatioFrame)
 RatioLabel.Size = UDim2.new(1, 0, 0.5, 0)
@@ -128,63 +132,86 @@ DropdownFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 DropdownFrame.ZIndex = 5
 Instance.new("UIListLayout", DropdownFrame)
 
--- TARGETING & ATTACK ENGINE [cite: 5, 8, 9]
+-- HELPER: UPDATE LOCK
+local function updateLock(target)
+    if target and target:FindFirstChild("Humanoid") and target.Humanoid.Health > 0 then
+        lockedTarget = target
+        lockTimer = tick()
+    end
+end
+
+-- TARGETING LOGIC (ENHANCED WITH NAME KEEPER / LOCK)
 local function getTargets()
     local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return {} end
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return {} end
+
+    local maxDist = 17
     local found = {}
-    local maxDist = 12
-    if multiTargetActive then
-        for _, player in pairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                local d = (player.Character.HumanoidRootPart.Position - char.HumanoidRootPart.Position).Magnitude
-                if d <= maxDist then table.insert(found, player.Character) end
-            end
+    local potentialTargets = {}
+
+    -- Check if existing lock is still valid (Time and Health only)
+    if lockedTarget then
+        local targetHum = lockedTarget:FindFirstChild("Humanoid")
+        
+        -- Reset lock ONLY if 5s passed or target died
+        if tick() - lockTimer > LOCK_DURATION or (targetHum and targetHum.Health <= 0) then
+            lockedTarget = nil
         end
-    else
-        local closest, dist = nil, maxDist
-        for _, player in pairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                local d = (player.Character.HumanoidRootPart.Position - char.HumanoidRootPart.Position).Magnitude
-                if d < dist then dist = d closest = player.Character end
-            end
-        end
-        if closest then table.insert(found, closest) end
     end
+
+    -- Find parts within radius sphere
+    local params = OverlapParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {char}
+    
+    local nearbyParts = workspace:GetPartBoundsInRadius(root.Position, maxDist, params)
+
+    for _, part in ipairs(nearbyParts) do
+        local model = part.Parent
+        if model and model:FindFirstChild("Humanoid") and model:FindFirstChild("HumanoidRootPart") then
+            if not potentialTargets[model] then
+                potentialTargets[model] = model.HumanoidRootPart
+            end
+        end
+    end
+
+    if multiTargetActive then
+        for model, _ in pairs(potentialTargets) do table.insert(found, model) end
+    else
+        -- If we have a valid locked target, stick to them even if they are outside the 12-stud radius
+        -- (This allows "Remote-based" persistence even if the radius detection misses them temporarily)
+        if lockedTarget then
+            table.insert(found, lockedTarget)
+        else
+            -- Otherwise, find a new target based on LookVector (Front facing)
+            local bestTarget = nil
+            local highestDot = -1
+
+            for model, targetRoot in pairs(potentialTargets) do
+                local directionToTarget = (targetRoot.Position - root.Position).Unit
+                local lookDirection = root.CFrame.LookVector
+                local dot = lookDirection:Dot(directionToTarget)
+
+                if dot > highestDot then
+                    highestDot = dot
+                    bestTarget = model
+                end
+            end
+            
+            if bestTarget then 
+                table.insert(found, bestTarget)
+                updateLock(bestTarget) -- Set the lock for 5s
+            end
+        end
+    end
+
     return found
 end
 
-local function performAttack(actionType, val)
-    local char = LocalPlayer.Character
-    local remote = char and char:FindFirstChild("Fists") and char.Fists:FindFirstChild("fistremote")
-    if not remote then return end 
-    local count = (actionType == "lmb" and multActive) and (tonumber(MultInput.Text) or 1) or 1
-    remote:FireServer(actionType, val)
- 
-    if autoHitActive and not isBlocking then
-        local targets = getTargets()
-        for _, targetChar in pairs(targets) do
-            -- RATIO LOGIC INTEGRATION 
-            local finalPartName = selectedPart
-            if selectedPart == "Ratio" then
-                local roll = math.random(1, 100)
-                finalPartName = (roll <= hitRatio) and "Head" or "Torso"
-            end
-
-            local targetPart = targetChar:FindFirstChild(finalPartName)
-            if targetPart then
-                for i = 1, count do
-                    remote:FireServer("part", targetPart, targetPart.Position, Vector3.new(0, 0, 0))
-                end
-            end
-        end
-    end
-end
-
--- ANIMATION LOGIC [cite: 10, 11, 12]
 local function stopAura()
     if currentAnimTrack then
-        currentAnimTrack:Stop(0.1)
+        currentAnimTrack:Stop(0.2)
         currentAnimTrack = nil
     end
 end
@@ -199,24 +226,78 @@ local function playAura(id)
         currentAnimTrack = hum:LoadAnimation(anim)
         currentAnimTrack.Looped = true
         currentAnimTrack.Priority = Enum.AnimationPriority.Action
-        currentAnimTrack:Play()
+        currentAnimTrack:Play(0.3)
     end
 end
 
+local function performAttack(actionType, val)
+    local char = LocalPlayer.Character
+    local remote = char and char:FindFirstChild("Fists") and char.Fists:FindFirstChild("fistremote")
+    if not remote then return end 
+
+    local isSpecialKey = (actionType == "keypress" and (val == "q" or val == "e"))
+    local useMult = (actionType == "lmb" or isSpecialKey) and multActive
+    local count = useMult and (tonumber(MultInput.Text) or 1) or 1
+    
+    remote:FireServer(actionType, val)
+
+    if autoHitActive and not isBlocking then
+        local targets = getTargets()
+        for _, targetChar in pairs(targets) do
+            if targetChar and targetChar:FindFirstChild("Humanoid") and targetChar.Humanoid.Health > 0 then
+                -- Refresh the lock timer on every hit
+                updateLock(targetChar)
+
+                local finalPartName = selectedPart
+                if selectedPart == "Ratio" then
+                    local roll = math.random(1, 100)
+                    finalPartName = (roll <= hitRatio) and "Head" or "Torso"
+                end
+
+                local targetPart = targetChar:FindFirstChild(finalPartName)
+                if targetPart then
+                    for i = 1, count do
+                        remote:FireServer("part", targetPart, targetPart.Position, Vector3.new(0, 0, 0))
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- AUTO-REALIATE / COUNTER-LOCK
+local function setupCounterLock()
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local hum = char:WaitForChild("Humanoid")
+    
+    table.insert(connections, hum.HealthChanged:Connect(function(health)
+        local tag = hum:FindFirstChild("creator") or hum:FindFirstChild("Attacker")
+        if tag and tag.Value and tag.Value:IsA("Player") and tag.Value.Character then
+            updateLock(tag.Value.Character)
+        end
+    end))
+end
+
+-- AURA FARM HEARTBEAT
 table.insert(connections, RunService.Heartbeat:Connect(function()
     local char = LocalPlayer.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if not hum or not auraActive then return end
-    local isMoving = hum.MoveDirection.Magnitude > 0
-    local isJumping = hum:GetState() == Enum.HumanoidStateType.Jumping or hum:GetState() == Enum.HumanoidStateType.Freefall
-    if isMoving or isJumping then
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    
+    if not hum or not root or not auraActive then return end
+    
+    local isMovingPhysically = root.AssemblyLinearVelocity.Magnitude > 0.5
+    local isInputMoving = hum.MoveDirection.Magnitude > 0
+    local isAirborne = hum.FloorMaterial == Enum.Material.Air
+    
+    if isInputMoving or isMovingPhysically or isAirborne then
         if currentAnimTrack and currentAnimTrack.IsPlaying then stopAura() end
     else
         if not currentAnimTrack or not currentAnimTrack.IsPlaying then playAura(auraAnimID) end
     end
 end))
 
--- UI LOGIC [cite: 13, 14, 15]
+-- UI EVENTS
 RatioInput.FocusLost:Connect(function()
     local val = tonumber(RatioInput.Text)
     if val then
@@ -239,7 +320,6 @@ for _, partName in pairs(bodyParts) do
         selectedPart = partName
         DropdownBtn.Text = "Target: " .. partName
         DropdownFrame.Visible = false
-        -- Toggle Ratio slider visibility 
         RatioFrame.Visible = (partName == "Ratio")
     end)
 end
@@ -251,7 +331,6 @@ AuraBtn.MouseButton1Click:Connect(function()
     if not auraActive then stopAura() end
 end)
 
-DropdownBtn.MouseButton1Click:Connect(function() DropdownFrame.Visible = not DropdownFrame.Visible end)
 ToggleBtn.MouseButton1Click:Connect(function()
     autoHitActive = not autoHitActive
     ToggleBtn.Text = "AUTO: " .. (autoHitActive and "ON" or "OFF")
@@ -271,31 +350,30 @@ MultToggle.MouseButton1Click:Connect(function()
 end)
 
 CleanBtn.MouseButton1Click:Connect(function()
-    local count = 0
+    zonesDisabled = not zonesDisabled
+    local targetState = not zonesDisabled
     for _, obj in pairs(game.Workspace:GetDescendants()) do
-        if (obj:IsA("BasePart") or obj:IsA("Model")) and string.find(string.lower(obj.Name), "zone") then
-            obj:Destroy()
-            count = count + 1
+        if obj:IsA("BasePart") and (string.find(string.lower(obj.Name), "zone") or obj:FindFirstChildOfClass("TouchInterest")) then
+            obj.CanTouch = targetState
         end
     end
-    CleanBtn.Text = "Deleted " .. count .. " Zones!"
-    task.delay(1.5, function() CleanBtn.Text = "Clean All 'Zones'" end)
+    CleanBtn.Text = zonesDisabled and "ZONES: DISABLED" or "ZONES: ENABLED"
+    CleanBtn.BackgroundColor3 = zonesDisabled and Color3.fromRGB(0, 0, 120) or Color3.fromRGB(0, 120, 0)
 end)
 
 CloseBtn.MouseButton1Click:Connect(function()
     autoHitActive = false
-    multActive = false
-    multiTargetActive = false
-    isBlocking = false
     auraActive = false
     stopAura()
+    for _, obj in pairs(game.Workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and (string.find(string.lower(obj.Name), "zone") or obj:FindFirstChildOfClass("TouchInterest")) then
+            obj.CanTouch = true
+        end
+    end
     for _, conn in pairs(connections) do if conn then conn:Disconnect() end end
-    connections = {}
     ScreenGui:Destroy()
-    print("Script safely shut down.")
 end)
 
--- INPUT CONNECTIONS [cite: 17, 18]
 table.insert(connections, UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
     if input.UserInputType == Enum.UserInputType.MouseButton1 then performAttack("lmb")
@@ -311,3 +389,9 @@ end))
 table.insert(connections, UserInputService.InputEnded:Connect(function(input, gpe)
     if input.KeyCode == Enum.KeyCode.F then isBlocking = false end
 end))
+
+DropdownBtn.MouseButton1Click:Connect(function() DropdownFrame.Visible = not DropdownFrame.Visible end)
+
+-- INITIALIZE
+setupCounterLock()
+LocalPlayer.CharacterAdded:Connect(setupCounterLock)
