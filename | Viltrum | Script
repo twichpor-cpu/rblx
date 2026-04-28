@@ -48,7 +48,7 @@ MainFrame.Draggable = true
 
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(0.8, 0, 0.08, 0)
-Title.Text = "FISTS HELPER + PARRY"
+Title.Text = "FISTS HELPER V15"
 Title.TextColor3 = Color3.new(1, 1, 1)
 Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 
