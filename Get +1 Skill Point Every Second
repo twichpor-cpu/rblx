@@ -1,9 +1,10 @@
 --[[
-    Advanced Auto Farm V8 (Fixed Enemy Index & Farm Targeting)
+    Advanced Auto Farm V14 (Universal NPC Connector)
     Fixes:
-    - Tab Switching: Improved synchronization between script refresh and game UI update.
-    - Enemy Farm: Expanded folder search and improved name matching for regular mobs.
-    - Multi-Event: Retained force-fire logic for maximum compatibility.
+    - NPC Locator: Now uses a recursive workspace scanner to find NPCs in any sub-folder.
+    - Modifier Support: Optimized string matching to connect UI selection to NPCs with modifiers.
+    - Error Handling: Added safe string conversion to prevent "Argument 1 missing or nil".
+    - Improved Teleport: Ensures the character is positioned correctly even if the NPC is in a deep folder.
 ]]
 
 local Players = game:GetService("Players")
@@ -30,7 +31,7 @@ local MagicalItemsPath = ScreenGuiPath:WaitForChild("ItemsFrame"):WaitForChild("
 
 -- Main UI Creation
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "FarmGui_V8"
+ScreenGui.Name = "FarmGui_V14"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = player:WaitForChild("PlayerGui")
 
@@ -48,7 +49,7 @@ Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 local Header = Instance.new("TextLabel")
 Header.Size = UDim2.new(1, 0, 0, 40)
 Header.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Header.Text = "AUTO FARM V8 (INDEX & TARGET FIX)"
+Header.Text = "AUTO FARM V14 (NPC FIX)"
 Header.TextColor3 = Color3.new(1, 1, 1)
 Header.Font = Enum.Font.GothamBold
 Header.TextSize = 14
@@ -100,8 +101,8 @@ TabBar.Position = UDim2.new(0, 10, 0, 85)
 TabBar.BackgroundTransparency = 1
 TabBar.Parent = MainFrame
 
-local BossTabBtn = createBtn("Boss Index", UDim2.new(0, 0, 0, 0), UDim2.new(0.5, -5, 1, 0), TabBar)
-local EnemyTabBtn = createBtn("Enemy Index", UDim2.new(0.5, 5, 0, 0), UDim2.new(0.5, -5, 1, 0), TabBar)
+local BossTabBtn = createBtn("Bosses", UDim2.new(0, 0, 0, 0), UDim2.new(0.5, -5, 1, 0), TabBar)
+local EnemyTabBtn = createBtn("Enemies", UDim2.new(0.5, 5, 0, 0), UDim2.new(0.5, -5, 1, 0), TabBar)
 
 local ListFrame = Instance.new("ScrollingFrame")
 ListFrame.Size = UDim2.new(1, -20, 0, 120)
@@ -175,12 +176,17 @@ local FarmToggle = createBtn("START AUTO FARM", UDim2.new(0, 10, 0, 500), UDim2.
 FarmToggle.BackgroundColor3 = Color3.fromRGB(40, 100, 40)
 FarmToggle.Font = Enum.Font.GothamBold
 
+-- Safe Helper: Converts any input to a lowercase string
+local function safeLower(val)
+    return tostring(val or ""):lower()
+end
+
 -- Logic: Refresh Weapon List
 local function refreshToolList()
     for _, child in pairs(ToolListFrame:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
     
     local path = (currentToolType == "Physical") and PhysicalItemsPath or MagicalItemsPath
-    local filter = string.lower(WeaponSearchBar.Text)
+    local filter = safeLower(WeaponSearchBar.Text)
     local count = 0
     
     PhysBtn.BackgroundColor3 = (currentToolType == "Physical") and Color3.fromRGB(70, 100, 70) or Color3.fromRGB(45, 45, 45)
@@ -191,7 +197,7 @@ local function refreshToolList()
             local realBtn = template:FindFirstChildOfClass("ImageButton")
             if realBtn then
                 local toolName = string.gsub(realBtn.Name, "_Button", "")
-                if filter == "" or string.find(string.lower(toolName), filter) then
+                if filter == "" or string.find(safeLower(toolName), filter) then
                     count = count + 1
                     local btn = createBtn(toolName, UDim2.new(0,0,0,0), UDim2.new(1,-10,0,25), ToolListFrame)
                     if selectedWeapon == toolName then btn.BackgroundColor3 = Color3.fromRGB(60, 80, 60) end
@@ -210,7 +216,7 @@ end
 local function refreshNPCList()
     for _, child in pairs(ListFrame:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
     
-    local filter = string.lower(SearchBar.Text)
+    local filter = safeLower(SearchBar.Text)
     local count = 0
     
     BossTabBtn.BackgroundColor3 = (currentTab == "Bosses") and Color3.fromRGB(60, 60, 90) or Color3.fromRGB(45, 45, 45)
@@ -219,7 +225,7 @@ local function refreshNPCList()
     for _, icon in pairs(EnemyDisplay:GetChildren()) do
         if icon:IsA("Frame") and string.find(icon.Name, "Icon") and icon.Name ~= "EnemyIconTemplate" then
             local npcName = string.gsub(icon.Name, "Icon", "")
-            if filter == "" or string.find(string.lower(npcName), filter) then
+            if filter == "" or string.find(safeLower(npcName), filter) then
                 count = count + 1
                 local btn = createBtn(npcName, UDim2.new(0,0,0,0), UDim2.new(1,-10,0,28), ListFrame)
                 if selectedTargetName == npcName then btn.BackgroundColor3 = Color3.fromRGB(60, 60, 90) end
@@ -254,7 +260,7 @@ BossTabBtn.MouseButton1Click:Connect(function()
     currentTab = "Bosses"
     local btn = CatList:FindFirstChild("BossesButton")
     forceFire(btn)
-    task.wait(0.5) -- Increased wait to ensure population
+    task.wait(0.6) 
     refreshNPCList()
 end)
 
@@ -262,7 +268,7 @@ EnemyTabBtn.MouseButton1Click:Connect(function()
     currentTab = "Enemies"
     local btn = CatList:FindFirstChild("EnemiesButton")
     forceFire(btn)
-    task.wait(0.5) -- Increased wait to ensure population
+    task.wait(0.6) 
     refreshNPCList()
 end)
 
@@ -300,68 +306,86 @@ RunService.Stepped:Connect(function()
     end
 end)
 
--- Main Farm Loop
-RunService.Heartbeat:Connect(function()
-    if not isAutoFarming or not selectedTargetName then return end
+-- RECURSIVE TARGET SEARCH (The Connection Fix)
+-- This function finds the NPC even if it's buried in deep folders or has modifiers
+local function getBestTarget()
     local char = player.Character
-    if not char then return end
-    
-    local targetModel = nil
-    -- Expanded folder list for better target finding
-    local targetFolders = {"Bosses", "AngelEnemies", "ArenaEnemies", "Enemies", "Mobs"}
-    
-    for _, folderName in pairs(targetFolders) do
-        local folder = workspace:FindFirstChild(folderName)
-        if folder then
-            for _, child in pairs(folder:GetChildren()) do
-                -- Improved name matching: Check if the folder child contains our selected name
-                if string.find(string.lower(child.Name), string.lower(selectedTargetName)) then
-                    local hum = child:FindFirstChildOfClass("Humanoid")
-                    if hum and hum.Health > 0 then
-                        targetModel = child
-                        break
+    local myHRP = char and char:FindFirstChild("HumanoidRootPart")
+    if not myHRP or not selectedTargetName then return nil end
+
+    local bestTarget = nil
+    local minDistance = math.huge
+    local cleanSelected = safeLower(selectedTargetName)
+
+    -- Scans EVERYTHING in workspace recursively to find models matching the name
+    for _, item in pairs(workspace:GetDescendants()) do
+        if item:IsA("Model") and item ~= char then
+            local modelName = safeLower(item.Name)
+            
+            -- Check if selected name is PART of the model's name (e.g., "Giant Slime" matches "Slime")
+            if string.find(modelName, cleanSelected) then
+                local hum = item:FindFirstChildOfClass("Humanoid")
+                local hrp = item:FindFirstChild("HumanoidRootPart") or item:FindFirstChild("Torso") or item:FindFirstChild("Head")
+                
+                if hum and hum.Health > 0 and hrp then
+                    local dist = (myHRP.Position - hrp.Position).Magnitude
+                    if dist < minDistance then
+                        minDistance = dist
+                        bestTarget = item
                     end
                 end
             end
         end
-        if targetModel then break end
     end
     
-    -- Fallback: Check workspace directly for matches if not found in folders
-    if not targetModel then
-        for _, child in pairs(workspace:GetChildren()) do
-            if string.find(string.lower(child.Name), string.lower(selectedTargetName)) then
-                local hum = child:FindFirstChildOfClass("Humanoid")
-                if hum and hum.Health > 0 then
-                    targetModel = child
-                    break
-                end
-            end
-        end
-    end
+    return bestTarget
+end
 
-    local targetHRP = targetModel and targetModel:FindFirstChild("HumanoidRootPart")
+-- Main Farm Loop
+RunService.Heartbeat:Connect(function()
+    if not isAutoFarming or not selectedTargetName then return end
+    
+    local char = player.Character
+    if not char then return end
+
+    local targetModel = getBestTarget()
+    local targetHRP = targetModel and (targetModel:FindFirstChild("HumanoidRootPart") or targetModel:FindFirstChild("Torso") or targetModel:FindFirstChild("Head"))
     local targetHum = targetModel and targetModel:FindFirstChildOfClass("Humanoid")
     
     if targetHRP and targetHum and targetHum.Health > 0 then
         StatusLabel.Text = "Status: Farming " .. targetModel.Name
+        
+        -- Tool Handling
         local tool = char:FindFirstChild(selectedWeapon)
         if not tool then
             local bpTool = player.Backpack:FindFirstChild(selectedWeapon)
             if bpTool and char:FindFirstChildOfClass("Humanoid") then
                 char:FindFirstChildOfClass("Humanoid"):EquipTool(bpTool)
+                tool = bpTool
             end
         end
+
         if tool then
-            tool:Activate()
+            -- Position & Attack
             local hrp = char:FindFirstChild("HumanoidRootPart")
             if hrp then
+                -- Move below target
                 hrp.CFrame = CFrame.new(targetHRP.Position - Vector3.new(0, farmDistance, 0), targetHRP.Position)
                 hrp.Velocity = Vector3.new(0,0,0)
             end
+            
+            -- Activation
+            if tool.Parent == char then
+                tool:Activate()
+            end
         end
     else
-        StatusLabel.Text = "Status: Looking for " .. selectedTargetName .. "..."
+        StatusLabel.Text = "Status: Connecting to " .. selectedTargetName .. "..."
+        -- Brute force swing to ensure hits on transition
+        if selectedWeapon then
+            local tool = char:FindFirstChild(selectedWeapon) or player.Backpack:FindFirstChild(selectedWeapon)
+            if tool and tool.Parent == char then tool:Activate() end
+        end
     end
 end)
 
