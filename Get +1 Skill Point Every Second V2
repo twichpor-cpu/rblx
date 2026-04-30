@@ -1,0 +1,435 @@
+--[[
+    Advanced Auto Farm V17 (Modifiers & Smart DMG Scaling)
+    Final Logic Overhaul:
+    - Pre-Farm Scan: Script now scans ALL matching NPCs and compares HP before TPing.
+    - Targeting: Strictly picks the lowest HP target from the entire pool.
+    - Attribute Support: Now checks 'BaseHealth' attribute (fixes 4.5e+22 issues).
+    - Defense Skip: Instead of stopping, it now skips targets you can't damage.
+    - Optimized Load: Reduced initial wait times for faster startup.
+    - Search Bar Fix: Ensured search bar starts cleared.
+    - Stability: Fixed 'Argument 1 missing or nil' in forceFire.
+    - Logic Fix: Added strict "Is Tool Equipped" check to prevent farm-start before tool is ready.
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
+
+-- State variables
+local selectedTargetName = nil
+local isAutoFarming = false
+local currentTab = "Bosses" 
+local currentToolType = "Physical" 
+local farmDistance = 7 
+local isActivelyFarming = false 
+local lastEquipTime = 0
+local simpleClickMode = false -- New: Only fires click logic, no re-equipping
+
+-- Performance
+local cachedTarget = nil
+local lastScanTime = 0
+local scanInterval = 0.5 -- Faster scanning for skipping logic
+
+-- Game UI Paths (With safety checks to prevent Infinite Yield)
+local ScreenGuiPath = player:WaitForChild("PlayerGui"):WaitForChild("ScreenGui")
+local EnemyIndex = ScreenGuiPath:WaitForChild("EnemyIndex")
+local ContentFrame = EnemyIndex:WaitForChild("ContentFrame")
+local EnemyDisplay = ContentFrame:WaitForChild("EnemyDisplay")
+local CatList = ContentFrame:WaitForChild("CategoryList")
+local DetailsPanel = EnemyIndex:FindFirstChild("DetailsPanel") or EnemyIndex:WaitForChild("DetailsPanel", 5) -- Shorter timeout
+local SkillGui = player:WaitForChild("PlayerGui"):WaitForChild("SkillPointGui")
+local StatsRows = SkillGui:WaitForChild("MainFrame"):WaitForChild("StatRowsFrame")
+local PhysicalItemsPath = ScreenGuiPath:WaitForChild("ItemsFrame"):WaitForChild("PhysicalItemsFrame")
+local MagicalItemsPath = ScreenGuiPath:WaitForChild("ItemsFrame"):WaitForChild("MagicalItemsFrame")
+local ItemInfo = ScreenGuiPath:WaitForChild("ItemsFrame"):FindFirstChild("ItemDamage") or ScreenGuiPath:WaitForChild("ItemsFrame"):WaitForChild("ItemDamage", 5)
+
+-- UI Helpers
+local function forceFire(button)
+    if not button then return end 
+    pcall(function()
+        local events = {"MouseButton1Click", "MouseButton1Down", "Activated"}
+        for _, eventName in pairs(events) do
+            local signal = button:FindFirstChild(eventName) or button[eventName]
+            if signal then
+                for _, connection in pairs(getconnections(signal)) do
+                    if connection.Function then task.spawn(connection.Function)
+                    elseif connection.Fire then connection:Fire() end
+                end
+            end
+        end
+    end)
+end
+
+-- Main UI Setup
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "FarmGui_V17_Final"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = player:WaitForChild("PlayerGui")
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 340, 0, 520) 
+MainFrame.Position = UDim2.new(0.5, -170, 0.5, -260)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
+
+local Header = Instance.new("TextLabel")
+Header.Size = UDim2.new(1, 0, 0, 40)
+Header.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+Header.Text = "AUTO FARM V17 (STABLE)"
+Header.TextColor3 = Color3.new(1, 1, 1)
+Header.Font = Enum.Font.GothamBold
+Header.TextSize = 14
+Header.Parent = MainFrame
+Instance.new("UICorner", Header).CornerRadius = UDim.new(0, 10)
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseBtn.Position = UDim2.new(1, -35, 0, 5)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.new(1, 1, 1)
+CloseBtn.Parent = Header
+CloseBtn.MouseButton1Click:Connect(function()
+    isAutoFarming = false
+    isActivelyFarming = false
+    ScreenGui:Destroy()
+end)
+
+local function createBtn(text, pos, size, parent)
+    local btn = Instance.new("TextButton")
+    btn.Size = size
+    btn.Position = pos
+    btn.Text = text
+    btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    btn.TextColor3 = Color3.new(1, 1, 1)
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 10
+    btn.Parent = parent
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+    return btn
+end
+
+local function parseValue(str)
+    if not str or str == "" then return 0 end
+    str = string.gsub(str, "[^%d%.%a%+%-]", "") 
+    local num = tonumber(string.match(str, "[%d%.eE%+%-]+")) or 0
+    local suffix = string.match(str, "[%a]+$")
+    if suffix then
+        suffix = suffix:upper()
+        if suffix == "K" then num = num * 1e3
+        elseif suffix == "M" then num = num * 1e6
+        elseif suffix == "B" then num = num * 1e9
+        elseif suffix == "T" then num = num * 1e12
+        elseif suffix == "QD" then num = num * 1e15
+        end
+    end
+    return num
+end
+
+local function getUserDamage()
+    local rowName = (currentToolType == "Physical") and "Physical DamageRow" or "Magical DamageRow"
+    local row = StatsRows:FindFirstChild(rowName)
+    if row and row:FindFirstChild("StatLabel") then
+        local baseDmgText = string.match(row.StatLabel.Text, ":%s*([%d%.%a]+)")
+        local baseDmg = parseValue(baseDmgText)
+        local weaponDmgText = ItemInfo and ItemInfo.Text or "1x"
+        local weaponMult = tonumber(string.match(weaponDmgText, "%d+%.?%d*")) or 1
+        return baseDmg * weaponMult
+    end
+    return 0
+end
+
+local function getTargetDefense()
+    if not selectedTargetName or not DetailsPanel then return 0 end
+    local icon = EnemyDisplay:FindFirstChild(selectedTargetName .. "Icon")
+    if icon then
+        local btn = icon:FindFirstChildOfClass("ImageButton")
+        if btn then forceFire(btn) end
+    end
+    task.wait(0.02)
+    local statsFrame = DetailsPanel:FindFirstChild("StatsFrame")
+    local defLabel = statsFrame and statsFrame:FindFirstChild("DefenseLabel")
+    return defLabel and parseValue(defLabel.Text) or 0
+end
+
+-- NPC SECTION
+local SearchBar = Instance.new("TextBox")
+SearchBar.Size = UDim2.new(1, -20, 0, 30)
+SearchBar.Position = UDim2.new(0, 10, 0, 50)
+SearchBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+SearchBar.PlaceholderText = "Search Index / Modifier..."
+SearchBar.Text = "" 
+SearchBar.TextColor3 = Color3.new(1, 1, 1)
+SearchBar.Font = Enum.Font.Gotham
+SearchBar.Parent = MainFrame
+Instance.new("UICorner", SearchBar).CornerRadius = UDim.new(0, 5)
+
+local TabBar = Instance.new("Frame")
+TabBar.Size = UDim2.new(1, -20, 0, 25)
+TabBar.Position = UDim2.new(0, 10, 0, 85)
+TabBar.BackgroundTransparency = 1
+TabBar.Parent = MainFrame
+
+local BossTabBtn = createBtn("Bosses", UDim2.new(0, 0, 0, 0), UDim2.new(0.33, -5, 1, 0), TabBar)
+local EnemyTabBtn = createBtn("Enemies", UDim2.new(0.33, 2, 0, 0), UDim2.new(0.33, -5, 1, 0), TabBar)
+local ModTabBtn = createBtn("Modifier", UDim2.new(0.66, 4, 0, 0), UDim2.new(0.34, -5, 1, 0), TabBar)
+
+local ListFrame = Instance.new("ScrollingFrame")
+ListFrame.Size = UDim2.new(1, -20, 0, 130)
+ListFrame.Position = UDim2.new(0, 10, 0, 115)
+ListFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+ListFrame.ScrollBarThickness = 4
+ListFrame.Parent = MainFrame
+Instance.new("UIListLayout", ListFrame).Padding = UDim.new(0, 5)
+
+local function refreshNPCList()
+    for _, child in pairs(ListFrame:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
+    local filter = (SearchBar.Text):lower()
+    local count = 0
+    BossTabBtn.BackgroundColor3 = (currentTab == "Bosses") and Color3.fromRGB(60, 60, 90) or Color3.fromRGB(45, 45, 45)
+    EnemyTabBtn.BackgroundColor3 = (currentTab == "Enemies") and Color3.fromRGB(60, 60, 90) or Color3.fromRGB(45, 45, 45)
+    ModTabBtn.BackgroundColor3 = (currentTab == "Modifier") and Color3.fromRGB(60, 60, 90) or Color3.fromRGB(45, 45, 45)
+
+    for _, icon in pairs(EnemyDisplay:GetChildren()) do
+        if icon:IsA("Frame") and string.find(icon.Name, "Icon") and icon.Name ~= "EnemyIconTemplate" then
+            local npcName = string.gsub(icon.Name, "Icon", "")
+            if filter == "" or string.find(npcName:lower(), filter) then
+                count = count + 1
+                local btn = createBtn(npcName, UDim2.new(0,0,0,0), UDim2.new(1,-10,0,28), ListFrame)
+                if selectedTargetName == npcName then btn.BackgroundColor3 = Color3.fromRGB(60, 60, 90) end
+                btn.MouseButton1Click:Connect(function()
+                    selectedTargetName = npcName
+                    refreshNPCList()
+                    cachedTarget = nil
+                end)
+            end
+        end
+    end
+    ListFrame.CanvasSize = UDim2.new(0, 0, 0, count * 33)
+end
+
+SearchBar:GetPropertyChangedSignal("Text"):Connect(refreshNPCList)
+BossTabBtn.MouseButton1Click:Connect(function() currentTab = "Bosses"; forceFire(CatList:FindFirstChild("BossesButton")); task.wait(0.1); refreshNPCList() end)
+EnemyTabBtn.MouseButton1Click:Connect(function() currentTab = "Enemies"; forceFire(CatList:FindFirstChild("EnemiesButton")); task.wait(0.1); refreshNPCList() end)
+ModTabBtn.MouseButton1Click:Connect(function() currentTab = "Modifier"; forceFire(CatList:FindFirstChild("ModifiersButton")); task.wait(0.1); refreshNPCList() end)
+
+local ToolCatFrame = Instance.new("Frame")
+ToolCatFrame.Size = UDim2.new(1, -20, 0, 35)
+ToolCatFrame.Position = UDim2.new(0, 10, 0, 255)
+ToolCatFrame.BackgroundTransparency = 1
+ToolCatFrame.Parent = MainFrame
+
+local PhysBtn = createBtn("PHYSICAL", UDim2.new(0, 0, 0, 0), UDim2.new(0.5, -5, 1, 0), ToolCatFrame)
+local MagBtn = createBtn("MAGICAL", UDim2.new(0.5, 5, 0, 0), UDim2.new(0.5, -5, 1, 0), ToolCatFrame)
+
+local function updateToolButtons()
+    PhysBtn.BackgroundColor3 = (currentToolType == "Physical") and Color3.fromRGB(60, 60, 90) or Color3.fromRGB(45, 45, 45)
+    MagBtn.BackgroundColor3 = (currentToolType == "Magical") and Color3.fromRGB(60, 60, 90) or Color3.fromRGB(45, 45, 45)
+end
+
+PhysBtn.MouseButton1Click:Connect(function() currentToolType = "Physical"; updateToolButtons() end)
+MagBtn.MouseButton1Click:Connect(function() currentToolType = "Magical"; updateToolButtons() end)
+updateToolButtons()
+
+local ToggleFrame = Instance.new("Frame")
+ToggleFrame.Size = UDim2.new(1, -20, 0, 35)
+ToggleFrame.Position = UDim2.new(0, 10, 0, 300)
+ToggleFrame.BackgroundTransparency = 1
+ToggleFrame.Parent = MainFrame
+
+local ClickToggle = createBtn("SIMPLE CLICK: OFF", UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 1, 0), ToggleFrame)
+ClickToggle.MouseButton1Click:Connect(function()
+    simpleClickMode = not simpleClickMode
+    ClickToggle.Text = simpleClickMode and "SIMPLE CLICK: ON (No Equip)" or "SIMPLE CLICK: OFF"
+    ClickToggle.BackgroundColor3 = simpleClickMode and Color3.fromRGB(60, 90, 60) or Color3.fromRGB(45, 45, 45)
+end)
+
+local SettingFrame = Instance.new("Frame")
+SettingFrame.Size = UDim2.new(1, -20, 0, 70)
+SettingFrame.Position = UDim2.new(0, 10, 0, 345)
+SettingFrame.BackgroundTransparency = 1
+SettingFrame.Parent = MainFrame
+
+local DistInput = Instance.new("TextBox")
+DistInput.Size = UDim2.new(0.3, 0, 0, 30)
+DistInput.Position = UDim2.new(0.7, 0, 0, 0)
+DistInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+DistInput.Text = tostring(farmDistance)
+DistInput.TextColor3 = Color3.new(1, 1, 1)
+DistInput.Parent = SettingFrame
+Instance.new("UICorner", DistInput).CornerRadius = UDim.new(0, 5)
+
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(1, 0, 0, 30)
+StatusLabel.Position = UDim2.new(0, 0, 0, 40)
+StatusLabel.Text = "Status: Idle"
+StatusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Parent = SettingFrame
+
+local FarmToggle = createBtn("START AUTO FARM", UDim2.new(0, 10, 0, 450), UDim2.new(1, -20, 0, 45), MainFrame)
+FarmToggle.BackgroundColor3 = Color3.fromRGB(40, 100, 40)
+FarmToggle.Font = Enum.Font.GothamBold
+
+local function getBestWeapon()
+    local char = player.Character
+    if not char then return nil end
+    
+    local referencePath = (currentToolType == "Physical") and PhysicalItemsPath or MagicalItemsPath
+    local validNames = {}
+    for _, t in pairs(referencePath:GetChildren()) do
+        if t:IsA("Frame") and t.Name == "Template" then
+            local rb = t:FindFirstChildOfClass("ImageButton")
+            if rb then validNames[string.gsub(rb.Name, "_Button", ""):lower()] = true end
+        end
+    end
+
+    -- Check Character first (Avoid re-equipping)
+    for _, tool in pairs(char:GetChildren()) do
+        if tool:IsA("Tool") and validNames[tool.Name:lower()] then return tool end
+    end
+    -- Check Backpack
+    for _, tool in pairs(player.Backpack:GetChildren()) do
+        if tool:IsA("Tool") and validNames[tool.Name:lower()] then return tool end
+    end
+    
+    return player.Backpack:FindFirstChildOfClass("Tool") or char:FindFirstChildOfClass("Tool")
+end
+
+local function getBestTarget()
+    local char = player.Character
+    if not char or not selectedTargetName or selectedTargetName == "" then return nil end
+
+    if tick() - lastScanTime >= scanInterval or not cachedTarget or not cachedTarget.Parent then
+        lastScanTime = tick()
+        local possibleTargets = {}
+        local filter = selectedTargetName:lower()
+        local userDmg = getUserDamage()
+        local targetDef = getTargetDefense()
+
+        for _, obj in pairs(workspace:GetChildren()) do
+            if obj:IsA("Folder") and (string.find(obj.Name, "Enemies") or obj.Name == "Bosses" or string.find(obj.Name, "Knights") or obj.Name == "Slimes") then
+                for _, item in pairs(obj:GetChildren()) do
+                    if item:IsA("Model") and string.find(item.Name:lower(), filter) then
+                        local hum = item:FindFirstChildOfClass("Humanoid")
+                        local hrp = item:FindFirstChild("HumanoidRootPart") or item:FindFirstChild("Torso") or item:FindFirstChild("Head")
+                        
+                        if hum and hrp and hum.Health > 0 then
+                            local realHP = item:GetAttribute("BaseHealth") or hum.Health
+                            table.insert(possibleTargets, {model = item, hp = realHP})
+                        end
+                    end
+                end
+            end
+        end
+
+        if #possibleTargets > 0 then
+            table.sort(possibleTargets, function(a, b) return a.hp < b.hp end)
+            
+            for _, entry in ipairs(possibleTargets) do
+                if userDmg > targetDef then
+                    cachedTarget = entry.model
+                    return cachedTarget
+                else
+                    StatusLabel.Text = "Skipped " .. entry.model.Name .. " (Too Tanky)"
+                end
+            end
+            cachedTarget = nil 
+        else
+            cachedTarget = nil
+        end
+    end
+    
+    return cachedTarget
+end
+
+-- Main Loop
+RunService.Heartbeat:Connect(function()
+    if not isAutoFarming then isActivelyFarming = false return end
+    local char = player.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not char or not hum or hum.Health <= 0 then return end
+
+    local targetModel = getBestTarget()
+
+    if targetModel then
+        local tool = nil
+        
+        -- TOOL READY CHECK
+        if not simpleClickMode then
+            tool = getBestWeapon()
+            if not tool then
+                isActivelyFarming = false
+                StatusLabel.Text = "Status: No Tool Found"
+                return
+            end
+            
+            -- Strict Equip Logic: If we need a tool, wait until it's in the character
+            if tool.Parent ~= char then
+                isActivelyFarming = false
+                StatusLabel.Text = "Status: Equipping Tool..."
+                if tick() - lastEquipTime > 0.8 then -- Slightly longer debounce for post-death
+                    lastEquipTime = tick()
+                    hum:EquipTool(tool)
+                end
+                return -- Stop loop here until equipped
+            end
+        else
+            tool = char:FindFirstChildOfClass("Tool")
+        end
+
+        -- If we reach here, we either have a tool equipped or are in Simple Click Mode
+        isActivelyFarming = true
+        local tHum = targetModel:FindFirstChildOfClass("Humanoid")
+        local displayHP = targetModel:GetAttribute("BaseHealth") or (tHum and tHum.Health) or 0
+        StatusLabel.Text = "Farming: " .. targetModel.Name .. " (HP: " .. displayHP .. ")"
+        
+        -- Teleport Logic
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local targetHRP = targetModel:FindFirstChild("HumanoidRootPart") or targetModel:FindFirstChild("Torso") or targetModel:FindFirstChild("Head")
+        if hrp and targetHRP then
+            hrp.CFrame = CFrame.new(targetHRP.Position - Vector3.new(0, tonumber(DistInput.Text) or 7, 0), targetHRP.Position)
+            hrp.Velocity = Vector3.new(0,0,0)
+        end
+
+        -- Attack Logic
+        if tool and tool.Parent == char then
+            tool:Activate()
+        end
+    else
+        isActivelyFarming = false
+        StatusLabel.Text = "Searching for valid target..."
+    end
+end)
+
+RunService.Stepped:Connect(function()
+    if isAutoFarming and isActivelyFarming and player.Character then
+        for _, part in pairs(player.Character:GetDescendants()) do
+            if part:IsA("BasePart") then part.CanCollide = false end
+        end
+    end
+end)
+
+FarmToggle.MouseButton1Click:Connect(function()
+    isAutoFarming = not isAutoFarming
+    FarmToggle.Text = isAutoFarming and "STOP AUTO FARM" or "START AUTO FARM"
+    FarmToggle.BackgroundColor3 = isAutoFarming and Color3.fromRGB(100, 40, 40) or Color3.fromRGB(40, 100, 40)
+    if isAutoFarming then 
+        cachedTarget = nil 
+    else
+        StatusLabel.Text = "Status: Idle"
+    end
+end)
+
+task.spawn(function()
+    if CatList then
+        forceFire(CatList:FindFirstChild("EnemiesButton"))
+        task.wait(0.1)
+        forceFire(CatList:FindFirstChild("BossesButton"))
+    end
+    refreshNPCList()
+end)
