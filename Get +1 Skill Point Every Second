@@ -7,7 +7,7 @@ local selectedTargetName = nil
 local isAutoFarming = false
 local currentTab = "Bosses" 
 local currentToolType = "Physical" -- "Physical" or "Magical"
-local farmDistance = 7.5 
+local farmDistance = 7 
 local isActivelyFarming = false -- Track if we are currently locked onto a target
 
 -- Performance Caching
@@ -274,7 +274,7 @@ end)
 
 SearchBar:GetPropertyChangedSignal("Text"):Connect(refreshNPCList)
 DistInput:GetPropertyChangedSignal("Text"):Connect(function()
-    farmDistance = tonumber(DistInput.Text) or 7.5
+    farmDistance = tonumber(DistInput.Text) or 7
 end)
 
 FarmToggle.MouseButton1Click:Connect(function()
