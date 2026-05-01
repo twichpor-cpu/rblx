@@ -1,16 +1,16 @@
 --[[
-    Advanced Auto Farm V18.2 (Gem Farm & Multi-Select)
+    Advanced Auto Farm V18.3 (Chests, Gems & Persistence)
     Updates:
-    - Added Auto Gem Farm: Fires TouchTransmitters in workspace.SpawnedGems.
-    - Damage Lock Logic: Sticks to target if health is decreasing.
-    - Multi-Select System: Select multiple NPCs/Bosses/Modifiers.
-    - UI: Restored Close button and added Gem Farm toggle.
-    - Persistence: Added Save/Load settings functionality via JSON.
+    - Added Auto Open Chests: Loops Basic (x100), Rare (x1), and Legendary (x1).
+    - UI Reorg: Gem and Chest farm buttons are now side-by-side above the Auto Farm button.
+    - Persistence: Saves/Loads targets, distance, and tool type.
+    - Logic: Integrated Damage Locking and Multi-Select.
 ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 
 -- File name for settings
@@ -20,6 +20,7 @@ local SETTINGS_FILE = "FarmSettings_V18.json"
 local selectedTargets = {} 
 local isAutoFarming = false
 local isGemFarming = false
+local isChestFarming = false
 local currentTab = "Bosses" 
 local currentToolType = "Physical" 
 local farmDistance = 7 
@@ -58,7 +59,6 @@ local function loadSettings()
     end)
 end
 
--- Load settings immediately
 loadSettings()
 
 -- Game UI Paths
@@ -73,6 +73,7 @@ local StatsRows = SkillGui:WaitForChild("MainFrame"):WaitForChild("StatRowsFrame
 local PhysicalItemsPath = ScreenGuiPath:WaitForChild("ItemsFrame"):WaitForChild("PhysicalItemsFrame")
 local MagicalItemsPath = ScreenGuiPath:WaitForChild("ItemsFrame"):WaitForChild("MagicalItemsFrame")
 local ItemInfo = ScreenGuiPath:WaitForChild("ItemsFrame"):FindFirstChild("ItemDamage") or ScreenGuiPath:WaitForChild("ItemsFrame"):WaitForChild("ItemDamage", 5)
+local OpenChestRemote = ReplicatedStorage:WaitForChild("OpenChest")
 
 -- UI Helpers
 local function forceFire(button)
@@ -93,13 +94,13 @@ end
 
 -- Main UI Setup
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "FarmGui_V18_2"
+ScreenGui.Name = "FarmGui_V18_3"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = player:WaitForChild("PlayerGui")
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 340, 0, 540) 
-MainFrame.Position = UDim2.new(0.5, -170, 0.5, -270)
+MainFrame.Size = UDim2.new(0, 340, 0, 560) 
+MainFrame.Position = UDim2.new(0.5, -170, 0.5, -280)
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
@@ -110,7 +111,7 @@ Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 local Header = Instance.new("TextLabel")
 Header.Size = UDim2.new(1, 0, 0, 40)
 Header.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Header.Text = "AUTO FARM V18.2"
+Header.Text = "AUTO FARM V18.3"
 Header.TextColor3 = Color3.new(1, 1, 1)
 Header.Font = Enum.Font.GothamBold
 Header.TextSize = 14
@@ -128,6 +129,7 @@ CloseBtn.Parent = Header
 CloseBtn.MouseButton1Click:Connect(function()
     isAutoFarming = false
     isGemFarming = false
+    isChestFarming = false
     ScreenGui:Destroy()
 end)
 
@@ -240,12 +242,8 @@ local function refreshNPCList()
                 end
 
                 btn.MouseButton1Click:Connect(function()
-                    if selectedTargets[npcName] then
-                        selectedTargets[npcName] = nil
-                    else
-                        selectedTargets[npcName] = true
-                    end
-                    saveSettings() -- Save when changing target
+                    selectedTargets[npcName] = not selectedTargets[npcName] or nil
+                    saveSettings()
                     refreshNPCList()
                     lockedTarget = nil
                     isCurrentlyDamaging = false
@@ -261,6 +259,7 @@ BossTabBtn.MouseButton1Click:Connect(function() currentTab = "Bosses"; forceFire
 EnemyTabBtn.MouseButton1Click:Connect(function() currentTab = "Enemies"; forceFire(CatList:FindFirstChild("EnemiesButton")); task.wait(0.1); refreshNPCList() end)
 ModTabBtn.MouseButton1Click:Connect(function() currentTab = "Modifier"; forceFire(CatList:FindFirstChild("ModifiersButton")); task.wait(0.1); refreshNPCList() end)
 
+-- Tool Type Selection
 local ToolCatFrame = Instance.new("Frame")
 ToolCatFrame.Size = UDim2.new(1, -20, 0, 35)
 ToolCatFrame.Position = UDim2.new(0, 10, 0, 255)
@@ -280,6 +279,7 @@ PhysBtn.MouseButton1Click:Connect(function() currentToolType = "Physical"; updat
 MagBtn.MouseButton1Click:Connect(function() currentToolType = "Magical"; updateToolButtons() end)
 updateToolButtons()
 
+-- Settings (Distance)
 local SettingFrame = Instance.new("Frame")
 SettingFrame.Size = UDim2.new(1, -20, 0, 70)
 SettingFrame.Position = UDim2.new(0, 10, 0, 300)
@@ -305,10 +305,7 @@ Instance.new("UICorner", DistInput).CornerRadius = UDim.new(0, 5)
 
 DistInput:GetPropertyChangedSignal("Text"):Connect(function()
     local val = tonumber(DistInput.Text)
-    if val then 
-        farmDistance = val 
-        saveSettings()
-    end
+    if val then farmDistance = val; saveSettings() end
 end)
 
 local StatusLabel = Instance.new("TextLabel")
@@ -319,21 +316,32 @@ StatusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
 StatusLabel.BackgroundTransparency = 1
 StatusLabel.Parent = SettingFrame
 
+-- Action Buttons Section
 local ActionFrame = Instance.new("Frame")
-ActionFrame.Size = UDim2.new(1, -20, 0, 130)
+ActionFrame.Size = UDim2.new(1, -20, 0, 160)
 ActionFrame.Position = UDim2.new(0, 10, 0, 380)
 ActionFrame.BackgroundTransparency = 1
 ActionFrame.Parent = MainFrame
-Instance.new("UIListLayout", ActionFrame).Padding = UDim.new(0, 10)
 
-local FarmToggle = createBtn("START AUTO FARM", UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 0, 50), ActionFrame)
-FarmToggle.BackgroundColor3 = Color3.fromRGB(40, 100, 40)
-FarmToggle.Font = Enum.Font.GothamBold
+local Row1 = Instance.new("Frame")
+Row1.Size = UDim2.new(1, 0, 0, 45)
+Row1.BackgroundTransparency = 1
+Row1.Parent = ActionFrame
 
-local GemToggle = createBtn("START AUTO GEM FARM", UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 0, 50), ActionFrame)
+local GemToggle = createBtn("AUTO GEMS", UDim2.new(0, 0, 0, 0), UDim2.new(0.5, -5, 1, 0), Row1)
 GemToggle.BackgroundColor3 = Color3.fromRGB(40, 70, 100)
 GemToggle.Font = Enum.Font.GothamBold
 
+local ChestToggle = createBtn("AUTO CHESTS", UDim2.new(0.5, 5, 0, 0), UDim2.new(0.5, -5, 1, 0), Row1)
+ChestToggle.BackgroundColor3 = Color3.fromRGB(100, 70, 40)
+ChestToggle.Font = Enum.Font.GothamBold
+
+local FarmToggle = createBtn("START MAIN AUTO FARM", UDim2.new(0, 0, 0, 55), UDim2.new(1, 0, 0, 60), ActionFrame)
+FarmToggle.BackgroundColor3 = Color3.fromRGB(40, 100, 40)
+FarmToggle.Font = Enum.Font.GothamBold
+FarmToggle.TextSize = 14
+
+-- Farm Logic
 local function getBestWeapon()
     local char = player.Character
     if not char then return nil end
@@ -460,21 +468,30 @@ end)
 -- Gem Farm Logic
 RunService.Heartbeat:Connect(function()
     if not isGemFarming then return end
-    
     local gemFolder = workspace:FindFirstChild("SpawnedGems")
     if not gemFolder then return end
-
-    local char = player.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
     for _, gem in pairs(gemFolder:GetChildren()) do
-        if gem:IsA("BasePart") or gem:IsA("Model") then
-            local touchInterest = gem:FindFirstChildWhichIsA("TouchTransmitter", true)
-            if touchInterest then
-                firetouchinterest(hrp, touchInterest.Parent, 0)
-                firetouchinterest(hrp, touchInterest.Parent, 1)
-            end
+        local touchInterest = gem:FindFirstChildWhichIsA("TouchTransmitter", true)
+        if touchInterest then
+            firetouchinterest(hrp, touchInterest.Parent, 0)
+            firetouchinterest(hrp, touchInterest.Parent, 1)
+        end
+    end
+end)
+
+-- Chest Farm Logic
+task.spawn(function()
+    while task.wait(0.2) do
+        if isChestFarming then
+            -- Open Basic x1
+            pcall(function() OpenChestRemote:FireServer("BasicChest", 1) end)
+            -- Open Rare x1
+            pcall(function() OpenChestRemote:FireServer("RareChest", 1) end)
+            -- Open Legendary x1
+            pcall(function() OpenChestRemote:FireServer("LegendaryChest", 1) end)
         end
     end
 end)
@@ -489,19 +506,21 @@ end)
 
 FarmToggle.MouseButton1Click:Connect(function()
     isAutoFarming = not isAutoFarming
-    FarmToggle.Text = isAutoFarming and "STOP AUTO FARM" or "START AUTO FARM"
+    FarmToggle.Text = isAutoFarming and "STOP MAIN AUTO FARM" or "START MAIN AUTO FARM"
     FarmToggle.BackgroundColor3 = isAutoFarming and Color3.fromRGB(100, 40, 40) or Color3.fromRGB(40, 100, 40)
-    if not isAutoFarming then 
-        lockedTarget = nil
-        isCurrentlyDamaging = false
-        StatusLabel.Text = "Status: Idle" 
-    end
+    if not isAutoFarming then lockedTarget = nil isCurrentlyDamaging = false StatusLabel.Text = "Status: Idle" end
 end)
 
 GemToggle.MouseButton1Click:Connect(function()
     isGemFarming = not isGemFarming
-    GemToggle.Text = isGemFarming and "STOP GEM FARM" or "START AUTO GEM FARM"
-    GemToggle.BackgroundColor3 = isGemFarming and Color3.fromRGB(100, 40, 40) or Color3.fromRGB(40, 70, 100)
+    GemToggle.Text = isGemFarming and "GEMS: ON" or "AUTO GEMS"
+    GemToggle.BackgroundColor3 = isGemFarming and Color3.fromRGB(30, 120, 180) or Color3.fromRGB(40, 70, 100)
+end)
+
+ChestToggle.MouseButton1Click:Connect(function()
+    isChestFarming = not isChestFarming
+    ChestToggle.Text = isChestFarming and "CHESTS: ON" or "AUTO CHESTS"
+    ChestToggle.BackgroundColor3 = isChestFarming and Color3.fromRGB(180, 120, 30) or Color3.fromRGB(100, 70, 40)
 end)
 
 task.spawn(function()
