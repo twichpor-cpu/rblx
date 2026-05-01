@@ -1,14 +1,11 @@
 --[[
-    Advanced Auto Farm V17 (Modifiers & Smart DMG Scaling)
-    Final Logic Overhaul:
-    - Pre-Farm Scan: Script now scans ALL matching NPCs and compares HP before TPing.
-    - Targeting: Strictly picks the lowest HP target from the entire pool.
-    - Attribute Support: Now checks 'BaseHealth' attribute (fixes 4.5e+22 issues).
-    - Defense Skip: Instead of stopping, it now skips targets you can't damage.
-    - Optimized Load: Reduced initial wait times for faster startup.
-    - Search Bar Fix: Ensured search bar starts cleared.
-    - Stability: Fixed 'Argument 1 missing or nil' in forceFire.
-    - Logic Fix: Added strict "Is Tool Equipped" check to prevent farm-start before tool is ready.
+    Advanced Auto Farm V18.1 (Damage Commit & UI Fix)
+    Logic Overhaul:
+    - Multi-Select System: Select multiple NPCs/Bosses/Modifiers.
+    - Damage Check: If target HP drops, script locks on until death (won't ignore).
+    - UI Fixes: Restored Close button, removed redundant Simple Click mode.
+    - Global Priority: Farms lowest HP among selected, unless already damaging a target.
+    - Persistence: Selections are remembered across tab switches.
 ]]
 
 local Players = game:GetService("Players")
@@ -16,27 +13,28 @@ local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 
 -- State variables
-local selectedTargetName = nil
+local selectedTargets = {} -- [Name] = true
 local isAutoFarming = false
 local currentTab = "Bosses" 
 local currentToolType = "Physical" 
 local farmDistance = 7 
 local isActivelyFarming = false 
 local lastEquipTime = 0
-local simpleClickMode = false -- New: Only fires click logic, no re-equipping
 
--- Performance
-local cachedTarget = nil
+-- Priority / Locking State
+local lockedTarget = nil
 local lastScanTime = 0
-local scanInterval = 0.5 -- Faster scanning for skipping logic
+local scanInterval = 0.8 
+local lastObservedHP = 0
+local isCurrentlyDamaging = false -- True if we successfully dealt DMG to current target
 
--- Game UI Paths (With safety checks to prevent Infinite Yield)
+-- Game UI Paths
 local ScreenGuiPath = player:WaitForChild("PlayerGui"):WaitForChild("ScreenGui")
 local EnemyIndex = ScreenGuiPath:WaitForChild("EnemyIndex")
 local ContentFrame = EnemyIndex:WaitForChild("ContentFrame")
 local EnemyDisplay = ContentFrame:WaitForChild("EnemyDisplay")
 local CatList = ContentFrame:WaitForChild("CategoryList")
-local DetailsPanel = EnemyIndex:FindFirstChild("DetailsPanel") or EnemyIndex:WaitForChild("DetailsPanel", 5) -- Shorter timeout
+local DetailsPanel = EnemyIndex:FindFirstChild("DetailsPanel") or EnemyIndex:WaitForChild("DetailsPanel", 5)
 local SkillGui = player:WaitForChild("PlayerGui"):WaitForChild("SkillPointGui")
 local StatsRows = SkillGui:WaitForChild("MainFrame"):WaitForChild("StatRowsFrame")
 local PhysicalItemsPath = ScreenGuiPath:WaitForChild("ItemsFrame"):WaitForChild("PhysicalItemsFrame")
@@ -62,7 +60,7 @@ end
 
 -- Main UI Setup
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "FarmGui_V17_Final"
+ScreenGui.Name = "FarmGui_V18_1"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = player:WaitForChild("PlayerGui")
 
@@ -79,7 +77,7 @@ Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 local Header = Instance.new("TextLabel")
 Header.Size = UDim2.new(1, 0, 0, 40)
 Header.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Header.Text = "AUTO FARM V17 (STABLE)"
+Header.Text = "AUTO FARM V18.1 (DMG LOCK)"
 Header.TextColor3 = Color3.new(1, 1, 1)
 Header.Font = Enum.Font.GothamBold
 Header.TextSize = 14
@@ -92,26 +90,13 @@ CloseBtn.Position = UDim2.new(1, -35, 0, 5)
 CloseBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
 CloseBtn.Text = "X"
 CloseBtn.TextColor3 = Color3.new(1, 1, 1)
+CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.Parent = Header
 CloseBtn.MouseButton1Click:Connect(function()
     isAutoFarming = false
     isActivelyFarming = false
     ScreenGui:Destroy()
 end)
-
-local function createBtn(text, pos, size, parent)
-    local btn = Instance.new("TextButton")
-    btn.Size = size
-    btn.Position = pos
-    btn.Text = text
-    btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-    btn.TextColor3 = Color3.new(1, 1, 1)
-    btn.Font = Enum.Font.Gotham
-    btn.TextSize = 10
-    btn.Parent = parent
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
-    return btn
-end
 
 local function parseValue(str)
     if not str or str == "" then return 0 end
@@ -143,20 +128,20 @@ local function getUserDamage()
     return 0
 end
 
-local function getTargetDefense()
-    if not selectedTargetName or not DetailsPanel then return 0 end
-    local icon = EnemyDisplay:FindFirstChild(selectedTargetName .. "Icon")
+local function getTargetDefense(name)
+    if not name or not DetailsPanel then return 0 end
+    local icon = EnemyDisplay:FindFirstChild(name .. "Icon")
     if icon then
         local btn = icon:FindFirstChildOfClass("ImageButton")
         if btn then forceFire(btn) end
     end
-    task.wait(0.02)
+    task.wait(0.01)
     local statsFrame = DetailsPanel:FindFirstChild("StatsFrame")
     local defLabel = statsFrame and statsFrame:FindFirstChild("DefenseLabel")
     return defLabel and parseValue(defLabel.Text) or 0
 end
 
--- NPC SECTION
+-- NPC LIST SECTION
 local SearchBar = Instance.new("TextBox")
 SearchBar.Size = UDim2.new(1, -20, 0, 30)
 SearchBar.Position = UDim2.new(0, 10, 0, 50)
@@ -174,12 +159,26 @@ TabBar.Position = UDim2.new(0, 10, 0, 85)
 TabBar.BackgroundTransparency = 1
 TabBar.Parent = MainFrame
 
+local function createBtn(text, pos, size, parent)
+    local btn = Instance.new("TextButton")
+    btn.Size = size
+    btn.Position = pos
+    btn.Text = text
+    btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    btn.TextColor3 = Color3.new(1, 1, 1)
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 10
+    btn.Parent = parent
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+    return btn
+end
+
 local BossTabBtn = createBtn("Bosses", UDim2.new(0, 0, 0, 0), UDim2.new(0.33, -5, 1, 0), TabBar)
 local EnemyTabBtn = createBtn("Enemies", UDim2.new(0.33, 2, 0, 0), UDim2.new(0.33, -5, 1, 0), TabBar)
 local ModTabBtn = createBtn("Modifier", UDim2.new(0.66, 4, 0, 0), UDim2.new(0.34, -5, 1, 0), TabBar)
 
 local ListFrame = Instance.new("ScrollingFrame")
-ListFrame.Size = UDim2.new(1, -20, 0, 130)
+ListFrame.Size = UDim2.new(1, -20, 0, 160) -- Made larger since simple click is gone
 ListFrame.Position = UDim2.new(0, 10, 0, 115)
 ListFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 ListFrame.ScrollBarThickness = 4
@@ -190,6 +189,7 @@ local function refreshNPCList()
     for _, child in pairs(ListFrame:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
     local filter = (SearchBar.Text):lower()
     local count = 0
+    
     BossTabBtn.BackgroundColor3 = (currentTab == "Bosses") and Color3.fromRGB(60, 60, 90) or Color3.fromRGB(45, 45, 45)
     EnemyTabBtn.BackgroundColor3 = (currentTab == "Enemies") and Color3.fromRGB(60, 60, 90) or Color3.fromRGB(45, 45, 45)
     ModTabBtn.BackgroundColor3 = (currentTab == "Modifier") and Color3.fromRGB(60, 60, 90) or Color3.fromRGB(45, 45, 45)
@@ -200,11 +200,17 @@ local function refreshNPCList()
             if filter == "" or string.find(npcName:lower(), filter) then
                 count = count + 1
                 local btn = createBtn(npcName, UDim2.new(0,0,0,0), UDim2.new(1,-10,0,28), ListFrame)
-                if selectedTargetName == npcName then btn.BackgroundColor3 = Color3.fromRGB(60, 60, 90) end
+                
+                if selectedTargets[npcName] then 
+                    btn.BackgroundColor3 = Color3.fromRGB(40, 120, 40) 
+                    btn.Text = "✔ " .. npcName
+                end
+
                 btn.MouseButton1Click:Connect(function()
-                    selectedTargetName = npcName
+                    selectedTargets[npcName] = not selectedTargets[npcName] or nil
                     refreshNPCList()
-                    cachedTarget = nil
+                    lockedTarget = nil
+                    isCurrentlyDamaging = false
                 end)
             end
         end
@@ -219,7 +225,7 @@ ModTabBtn.MouseButton1Click:Connect(function() currentTab = "Modifier"; forceFir
 
 local ToolCatFrame = Instance.new("Frame")
 ToolCatFrame.Size = UDim2.new(1, -20, 0, 35)
-ToolCatFrame.Position = UDim2.new(0, 10, 0, 255)
+ToolCatFrame.Position = UDim2.new(0, 10, 0, 285)
 ToolCatFrame.BackgroundTransparency = 1
 ToolCatFrame.Parent = MainFrame
 
@@ -235,22 +241,9 @@ PhysBtn.MouseButton1Click:Connect(function() currentToolType = "Physical"; updat
 MagBtn.MouseButton1Click:Connect(function() currentToolType = "Magical"; updateToolButtons() end)
 updateToolButtons()
 
-local ToggleFrame = Instance.new("Frame")
-ToggleFrame.Size = UDim2.new(1, -20, 0, 35)
-ToggleFrame.Position = UDim2.new(0, 10, 0, 300)
-ToggleFrame.BackgroundTransparency = 1
-ToggleFrame.Parent = MainFrame
-
-local ClickToggle = createBtn("SIMPLE CLICK: OFF", UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 1, 0), ToggleFrame)
-ClickToggle.MouseButton1Click:Connect(function()
-    simpleClickMode = not simpleClickMode
-    ClickToggle.Text = simpleClickMode and "SIMPLE CLICK: ON (No Equip)" or "SIMPLE CLICK: OFF"
-    ClickToggle.BackgroundColor3 = simpleClickMode and Color3.fromRGB(60, 90, 60) or Color3.fromRGB(45, 45, 45)
-end)
-
 local SettingFrame = Instance.new("Frame")
 SettingFrame.Size = UDim2.new(1, -20, 0, 70)
-SettingFrame.Position = UDim2.new(0, 10, 0, 345)
+SettingFrame.Position = UDim2.new(0, 10, 0, 330)
 SettingFrame.BackgroundTransparency = 1
 SettingFrame.Parent = MainFrame
 
@@ -278,7 +271,6 @@ FarmToggle.Font = Enum.Font.GothamBold
 local function getBestWeapon()
     local char = player.Character
     if not char then return nil end
-    
     local referencePath = (currentToolType == "Physical") and PhysicalItemsPath or MagicalItemsPath
     local validNames = {}
     for _, t in pairs(referencePath:GetChildren()) do
@@ -287,122 +279,122 @@ local function getBestWeapon()
             if rb then validNames[string.gsub(rb.Name, "_Button", ""):lower()] = true end
         end
     end
-
-    -- Check Character first (Avoid re-equipping)
-    for _, tool in pairs(char:GetChildren()) do
-        if tool:IsA("Tool") and validNames[tool.Name:lower()] then return tool end
-    end
-    -- Check Backpack
-    for _, tool in pairs(player.Backpack:GetChildren()) do
-        if tool:IsA("Tool") and validNames[tool.Name:lower()] then return tool end
-    end
-    
+    for _, tool in pairs(char:GetChildren()) do if tool:IsA("Tool") and validNames[tool.Name:lower()] then return tool end end
+    for _, tool in pairs(player.Backpack:GetChildren()) do if tool:IsA("Tool") and validNames[tool.Name:lower()] then return tool end end
     return player.Backpack:FindFirstChildOfClass("Tool") or char:FindFirstChildOfClass("Tool")
 end
 
-local function getBestTarget()
-    local char = player.Character
-    if not char or not selectedTargetName or selectedTargetName == "" then return nil end
+local function findBestNewTarget()
+    local userDmg = getUserDamage()
+    local possibleEntries = {}
 
-    if tick() - lastScanTime >= scanInterval or not cachedTarget or not cachedTarget.Parent then
-        lastScanTime = tick()
-        local possibleTargets = {}
-        local filter = selectedTargetName:lower()
-        local userDmg = getUserDamage()
-        local targetDef = getTargetDefense()
+    for _, obj in pairs(workspace:GetChildren()) do
+        if obj:IsA("Folder") and (string.find(obj.Name, "Enemies") or obj.Name == "Bosses" or string.find(obj.Name, "Knights") or obj.Name == "Slimes") then
+            for _, item in pairs(obj:GetChildren()) do
+                if item:IsA("Model") then
+                    local matchFound = false
+                    for selectedName, _ in pairs(selectedTargets) do
+                        if string.find(item.Name:lower(), selectedName:lower()) then matchFound = true; break end
+                    end
 
-        for _, obj in pairs(workspace:GetChildren()) do
-            if obj:IsA("Folder") and (string.find(obj.Name, "Enemies") or obj.Name == "Bosses" or string.find(obj.Name, "Knights") or obj.Name == "Slimes") then
-                for _, item in pairs(obj:GetChildren()) do
-                    if item:IsA("Model") and string.find(item.Name:lower(), filter) then
+                    if matchFound then
                         local hum = item:FindFirstChildOfClass("Humanoid")
                         local hrp = item:FindFirstChild("HumanoidRootPart") or item:FindFirstChild("Torso") or item:FindFirstChild("Head")
-                        
                         if hum and hrp and hum.Health > 0 then
                             local realHP = item:GetAttribute("BaseHealth") or hum.Health
-                            table.insert(possibleTargets, {model = item, hp = realHP})
+                            table.insert(possibleEntries, {model = item, hp = realHP})
                         end
                     end
                 end
             end
         end
+    end
 
-        if #possibleTargets > 0 then
-            table.sort(possibleTargets, function(a, b) return a.hp < b.hp end)
-            
-            for _, entry in ipairs(possibleTargets) do
-                if userDmg > targetDef then
-                    cachedTarget = entry.model
-                    return cachedTarget
-                else
-                    StatusLabel.Text = "Skipped " .. entry.model.Name .. " (Too Tanky)"
-                end
-            end
-            cachedTarget = nil 
-        else
-            cachedTarget = nil
+    if #possibleEntries > 0 then
+        table.sort(possibleEntries, function(a, b) return a.hp < b.hp end)
+        for _, entry in ipairs(possibleEntries) do
+            local def = getTargetDefense(entry.model.Name)
+            if userDmg > def then return entry.model end
         end
     end
-    
-    return cachedTarget
+    return nil
 end
 
 -- Main Loop
 RunService.Heartbeat:Connect(function()
-    if not isAutoFarming then isActivelyFarming = false return end
+    if not isAutoFarming then isActivelyFarming = false lockedTarget = nil return end
+    
     local char = player.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not char or not hum or hum.Health <= 0 then return end
 
-    local targetModel = getBestTarget()
-
-    if targetModel then
-        local tool = nil
-        
-        -- TOOL READY CHECK
-        if not simpleClickMode then
-            tool = getBestWeapon()
-            if not tool then
-                isActivelyFarming = false
-                StatusLabel.Text = "Status: No Tool Found"
-                return
-            end
-            
-            -- Strict Equip Logic: If we need a tool, wait until it's in the character
-            if tool.Parent ~= char then
-                isActivelyFarming = false
-                StatusLabel.Text = "Status: Equipping Tool..."
-                if tick() - lastEquipTime > 0.8 then -- Slightly longer debounce for post-death
-                    lastEquipTime = tick()
-                    hum:EquipTool(tool)
-                end
-                return -- Stop loop here until equipped
-            end
+    -- VALIDATION & DMG LOCK CHECK
+    if lockedTarget and lockedTarget.Parent then
+        local lHum = lockedTarget:FindFirstChildOfClass("Humanoid")
+        if not lHum or lHum.Health <= 0 then
+            lockedTarget = nil
+            isCurrentlyDamaging = false
         else
-            tool = char:FindFirstChildOfClass("Tool")
+            -- If we were damaging them, stick to them no matter what
+            local currentHP = lockedTarget:GetAttribute("BaseHealth") or lHum.Health
+            if currentHP < lastObservedHP then
+                isCurrentlyDamaging = true
+            end
+            lastObservedHP = currentHP
+        end
+    else
+        lockedTarget = nil
+        isCurrentlyDamaging = false
+    end
+
+    -- TARGET SEARCH (Only if not currently dealing DMG to someone)
+    if not isCurrentlyDamaging and (not lockedTarget or tick() - lastScanTime >= scanInterval) then
+        lastScanTime = tick()
+        local best = findBestNewTarget()
+        if best then 
+            lockedTarget = best 
+            local lHum = lockedTarget:FindFirstChildOfClass("Humanoid")
+            lastObservedHP = lockedTarget:GetAttribute("BaseHealth") or (lHum and lHum.Health) or 0
+        end
+    end
+
+    if lockedTarget then
+        local tool = getBestWeapon()
+        if not tool then
+            isActivelyFarming = false
+            StatusLabel.Text = "Status: No Tool Found"
+            return
+        end
+        
+        -- EQUIP CHECK
+        if tool.Parent ~= char then
+            isActivelyFarming = false
+            StatusLabel.Text = "Status: Equipping " .. tool.Name
+            if tick() - lastEquipTime > 0.8 then
+                lastEquipTime = tick()
+                hum:EquipTool(tool)
+            end
+            return 
         end
 
-        -- If we reach here, we either have a tool equipped or are in Simple Click Mode
+        -- EXECUTION
         isActivelyFarming = true
-        local tHum = targetModel:FindFirstChildOfClass("Humanoid")
-        local displayHP = targetModel:GetAttribute("BaseHealth") or (tHum and tHum.Health) or 0
-        StatusLabel.Text = "Farming: " .. targetModel.Name .. " (HP: " .. displayHP .. ")"
+        local tHum = lockedTarget:FindFirstChildOfClass("Humanoid")
+        local displayHP = lockedTarget:GetAttribute("BaseHealth") or (tHum and tHum.Health) or 0
+        StatusLabel.Text = (isCurrentlyDamaging and "DAMAGING: " or "Targeting: ") .. lockedTarget.Name .. " (" .. displayHP .. " HP)"
         
-        -- Teleport Logic
         local hrp = char:FindFirstChild("HumanoidRootPart")
-        local targetHRP = targetModel:FindFirstChild("HumanoidRootPart") or targetModel:FindFirstChild("Torso") or targetModel:FindFirstChild("Head")
-        if hrp and targetHRP then
-            hrp.CFrame = CFrame.new(targetHRP.Position - Vector3.new(0, tonumber(DistInput.Text) or 7, 0), targetHRP.Position)
+        local tHRP = lockedTarget:FindFirstChild("HumanoidRootPart") or lockedTarget:FindFirstChild("Torso") or lockedTarget:FindFirstChild("Head")
+        
+        if hrp and tHRP then
+            hrp.CFrame = CFrame.new(tHRP.Position - Vector3.new(0, tonumber(DistInput.Text) or 7, 0), tHRP.Position)
             hrp.Velocity = Vector3.new(0,0,0)
         end
 
-        -- Attack Logic
-        if tool and tool.Parent == char then
-            tool:Activate()
-        end
+        if tool.Parent == char then tool:Activate() end
     else
         isActivelyFarming = false
-        StatusLabel.Text = "Searching for valid target..."
+        StatusLabel.Text = "Searching Selected Pool..."
     end
 end)
 
@@ -418,10 +410,10 @@ FarmToggle.MouseButton1Click:Connect(function()
     isAutoFarming = not isAutoFarming
     FarmToggle.Text = isAutoFarming and "STOP AUTO FARM" or "START AUTO FARM"
     FarmToggle.BackgroundColor3 = isAutoFarming and Color3.fromRGB(100, 40, 40) or Color3.fromRGB(40, 100, 40)
-    if isAutoFarming then 
-        cachedTarget = nil 
-    else
-        StatusLabel.Text = "Status: Idle"
+    if not isAutoFarming then 
+        lockedTarget = nil
+        isCurrentlyDamaging = false
+        StatusLabel.Text = "Status: Idle" 
     end
 end)
 
@@ -430,6 +422,8 @@ task.spawn(function()
         forceFire(CatList:FindFirstChild("EnemiesButton"))
         task.wait(0.1)
         forceFire(CatList:FindFirstChild("BossesButton"))
+        task.wait(0.1)
+        forceFire(CatList:FindFirstChild("ModifiersButton"))
     end
     refreshNPCList()
 end)
