@@ -1,20 +1,25 @@
 --[[
-    Advanced Auto Farm V18.1 (Damage Commit & UI Fix)
-    Logic Overhaul:
+    Advanced Auto Farm V18.2 (Gem Farm & Multi-Select)
+    Updates:
+    - Added Auto Gem Farm: Fires TouchTransmitters in workspace.SpawnedGems.
+    - Damage Lock Logic: Sticks to target if health is decreasing.
     - Multi-Select System: Select multiple NPCs/Bosses/Modifiers.
-    - Damage Check: If target HP drops, script locks on until death (won't ignore).
-    - UI Fixes: Restored Close button, removed redundant Simple Click mode.
-    - Global Priority: Farms lowest HP among selected, unless already damaging a target.
-    - Persistence: Selections are remembered across tab switches.
+    - UI: Restored Close button and added Gem Farm toggle.
+    - Persistence: Added Save/Load settings functionality via JSON.
 ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
 
+-- File name for settings
+local SETTINGS_FILE = "FarmSettings_V18.json"
+
 -- State variables
-local selectedTargets = {} -- [Name] = true
+local selectedTargets = {} 
 local isAutoFarming = false
+local isGemFarming = false
 local currentTab = "Bosses" 
 local currentToolType = "Physical" 
 local farmDistance = 7 
@@ -26,7 +31,35 @@ local lockedTarget = nil
 local lastScanTime = 0
 local scanInterval = 0.8 
 local lastObservedHP = 0
-local isCurrentlyDamaging = false -- True if we successfully dealt DMG to current target
+local isCurrentlyDamaging = false 
+
+-- Persistence Logic
+local function saveSettings()
+    local data = {
+        selectedTargets = selectedTargets,
+        currentToolType = currentToolType,
+        farmDistance = farmDistance
+    }
+    pcall(function()
+        if writefile then
+            writefile(SETTINGS_FILE, HttpService:JSONEncode(data))
+        end
+    end)
+end
+
+local function loadSettings()
+    pcall(function()
+        if readfile and isfile and isfile(SETTINGS_FILE) then
+            local data = HttpService:JSONDecode(readfile(SETTINGS_FILE))
+            if data.selectedTargets then selectedTargets = data.selectedTargets end
+            if data.currentToolType then currentToolType = data.currentToolType end
+            if data.farmDistance then farmDistance = data.farmDistance end
+        end
+    end)
+end
+
+-- Load settings immediately
+loadSettings()
 
 -- Game UI Paths
 local ScreenGuiPath = player:WaitForChild("PlayerGui"):WaitForChild("ScreenGui")
@@ -60,13 +93,13 @@ end
 
 -- Main UI Setup
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "FarmGui_V18_1"
+ScreenGui.Name = "FarmGui_V18_2"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = player:WaitForChild("PlayerGui")
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 340, 0, 520) 
-MainFrame.Position = UDim2.new(0.5, -170, 0.5, -260)
+MainFrame.Size = UDim2.new(0, 340, 0, 540) 
+MainFrame.Position = UDim2.new(0.5, -170, 0.5, -270)
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
@@ -77,7 +110,7 @@ Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 local Header = Instance.new("TextLabel")
 Header.Size = UDim2.new(1, 0, 0, 40)
 Header.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Header.Text = "AUTO FARM V18.1 (DMG LOCK)"
+Header.Text = "AUTO FARM V18.2"
 Header.TextColor3 = Color3.new(1, 1, 1)
 Header.Font = Enum.Font.GothamBold
 Header.TextSize = 14
@@ -94,7 +127,7 @@ CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.Parent = Header
 CloseBtn.MouseButton1Click:Connect(function()
     isAutoFarming = false
-    isActivelyFarming = false
+    isGemFarming = false
     ScreenGui:Destroy()
 end)
 
@@ -178,7 +211,7 @@ local EnemyTabBtn = createBtn("Enemies", UDim2.new(0.33, 2, 0, 0), UDim2.new(0.3
 local ModTabBtn = createBtn("Modifier", UDim2.new(0.66, 4, 0, 0), UDim2.new(0.34, -5, 1, 0), TabBar)
 
 local ListFrame = Instance.new("ScrollingFrame")
-ListFrame.Size = UDim2.new(1, -20, 0, 160) -- Made larger since simple click is gone
+ListFrame.Size = UDim2.new(1, -20, 0, 130)
 ListFrame.Position = UDim2.new(0, 10, 0, 115)
 ListFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 ListFrame.ScrollBarThickness = 4
@@ -207,7 +240,12 @@ local function refreshNPCList()
                 end
 
                 btn.MouseButton1Click:Connect(function()
-                    selectedTargets[npcName] = not selectedTargets[npcName] or nil
+                    if selectedTargets[npcName] then
+                        selectedTargets[npcName] = nil
+                    else
+                        selectedTargets[npcName] = true
+                    end
+                    saveSettings() -- Save when changing target
                     refreshNPCList()
                     lockedTarget = nil
                     isCurrentlyDamaging = false
@@ -225,7 +263,7 @@ ModTabBtn.MouseButton1Click:Connect(function() currentTab = "Modifier"; forceFir
 
 local ToolCatFrame = Instance.new("Frame")
 ToolCatFrame.Size = UDim2.new(1, -20, 0, 35)
-ToolCatFrame.Position = UDim2.new(0, 10, 0, 285)
+ToolCatFrame.Position = UDim2.new(0, 10, 0, 255)
 ToolCatFrame.BackgroundTransparency = 1
 ToolCatFrame.Parent = MainFrame
 
@@ -235,6 +273,7 @@ local MagBtn = createBtn("MAGICAL", UDim2.new(0.5, 5, 0, 0), UDim2.new(0.5, -5, 
 local function updateToolButtons()
     PhysBtn.BackgroundColor3 = (currentToolType == "Physical") and Color3.fromRGB(60, 60, 90) or Color3.fromRGB(45, 45, 45)
     MagBtn.BackgroundColor3 = (currentToolType == "Magical") and Color3.fromRGB(60, 60, 90) or Color3.fromRGB(45, 45, 45)
+    saveSettings()
 end
 
 PhysBtn.MouseButton1Click:Connect(function() currentToolType = "Physical"; updateToolButtons() end)
@@ -243,9 +282,17 @@ updateToolButtons()
 
 local SettingFrame = Instance.new("Frame")
 SettingFrame.Size = UDim2.new(1, -20, 0, 70)
-SettingFrame.Position = UDim2.new(0, 10, 0, 330)
+SettingFrame.Position = UDim2.new(0, 10, 0, 300)
 SettingFrame.BackgroundTransparency = 1
 SettingFrame.Parent = MainFrame
+
+local DistLabel = Instance.new("TextLabel")
+DistLabel.Size = UDim2.new(0.7, 0, 0, 30)
+DistLabel.Text = "Farm Distance:"
+DistLabel.TextColor3 = Color3.new(1, 1, 1)
+DistLabel.BackgroundTransparency = 1
+DistLabel.TextXAlignment = Enum.TextXAlignment.Left
+DistLabel.Parent = SettingFrame
 
 local DistInput = Instance.new("TextBox")
 DistInput.Size = UDim2.new(0.3, 0, 0, 30)
@@ -256,6 +303,14 @@ DistInput.TextColor3 = Color3.new(1, 1, 1)
 DistInput.Parent = SettingFrame
 Instance.new("UICorner", DistInput).CornerRadius = UDim.new(0, 5)
 
+DistInput:GetPropertyChangedSignal("Text"):Connect(function()
+    local val = tonumber(DistInput.Text)
+    if val then 
+        farmDistance = val 
+        saveSettings()
+    end
+end)
+
 local StatusLabel = Instance.new("TextLabel")
 StatusLabel.Size = UDim2.new(1, 0, 0, 30)
 StatusLabel.Position = UDim2.new(0, 0, 0, 40)
@@ -264,9 +319,20 @@ StatusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
 StatusLabel.BackgroundTransparency = 1
 StatusLabel.Parent = SettingFrame
 
-local FarmToggle = createBtn("START AUTO FARM", UDim2.new(0, 10, 0, 450), UDim2.new(1, -20, 0, 45), MainFrame)
+local ActionFrame = Instance.new("Frame")
+ActionFrame.Size = UDim2.new(1, -20, 0, 130)
+ActionFrame.Position = UDim2.new(0, 10, 0, 380)
+ActionFrame.BackgroundTransparency = 1
+ActionFrame.Parent = MainFrame
+Instance.new("UIListLayout", ActionFrame).Padding = UDim.new(0, 10)
+
+local FarmToggle = createBtn("START AUTO FARM", UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 0, 50), ActionFrame)
 FarmToggle.BackgroundColor3 = Color3.fromRGB(40, 100, 40)
 FarmToggle.Font = Enum.Font.GothamBold
+
+local GemToggle = createBtn("START AUTO GEM FARM", UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 0, 50), ActionFrame)
+GemToggle.BackgroundColor3 = Color3.fromRGB(40, 70, 100)
+GemToggle.Font = Enum.Font.GothamBold
 
 local function getBestWeapon()
     local char = player.Character
@@ -320,7 +386,7 @@ local function findBestNewTarget()
     return nil
 end
 
--- Main Loop
+-- NPC Farm Loop
 RunService.Heartbeat:Connect(function()
     if not isAutoFarming then isActivelyFarming = false lockedTarget = nil return end
     
@@ -328,18 +394,14 @@ RunService.Heartbeat:Connect(function()
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not char or not hum or hum.Health <= 0 then return end
 
-    -- VALIDATION & DMG LOCK CHECK
     if lockedTarget and lockedTarget.Parent then
         local lHum = lockedTarget:FindFirstChildOfClass("Humanoid")
         if not lHum or lHum.Health <= 0 then
             lockedTarget = nil
             isCurrentlyDamaging = false
         else
-            -- If we were damaging them, stick to them no matter what
             local currentHP = lockedTarget:GetAttribute("BaseHealth") or lHum.Health
-            if currentHP < lastObservedHP then
-                isCurrentlyDamaging = true
-            end
+            if currentHP < lastObservedHP then isCurrentlyDamaging = true end
             lastObservedHP = currentHP
         end
     else
@@ -347,7 +409,6 @@ RunService.Heartbeat:Connect(function()
         isCurrentlyDamaging = false
     end
 
-    -- TARGET SEARCH (Only if not currently dealing DMG to someone)
     if not isCurrentlyDamaging and (not lockedTarget or tick() - lastScanTime >= scanInterval) then
         lastScanTime = tick()
         local best = findBestNewTarget()
@@ -366,7 +427,6 @@ RunService.Heartbeat:Connect(function()
             return
         end
         
-        -- EQUIP CHECK
         if tool.Parent ~= char then
             isActivelyFarming = false
             StatusLabel.Text = "Status: Equipping " .. tool.Name
@@ -377,7 +437,6 @@ RunService.Heartbeat:Connect(function()
             return 
         end
 
-        -- EXECUTION
         isActivelyFarming = true
         local tHum = lockedTarget:FindFirstChildOfClass("Humanoid")
         local displayHP = lockedTarget:GetAttribute("BaseHealth") or (tHum and tHum.Health) or 0
@@ -387,7 +446,7 @@ RunService.Heartbeat:Connect(function()
         local tHRP = lockedTarget:FindFirstChild("HumanoidRootPart") or lockedTarget:FindFirstChild("Torso") or lockedTarget:FindFirstChild("Head")
         
         if hrp and tHRP then
-            hrp.CFrame = CFrame.new(tHRP.Position - Vector3.new(0, tonumber(DistInput.Text) or 7, 0), tHRP.Position)
+            hrp.CFrame = CFrame.new(tHRP.Position - Vector3.new(0, farmDistance, 0), tHRP.Position)
             hrp.Velocity = Vector3.new(0,0,0)
         end
 
@@ -395,6 +454,28 @@ RunService.Heartbeat:Connect(function()
     else
         isActivelyFarming = false
         StatusLabel.Text = "Searching Selected Pool..."
+    end
+end)
+
+-- Gem Farm Logic
+RunService.Heartbeat:Connect(function()
+    if not isGemFarming then return end
+    
+    local gemFolder = workspace:FindFirstChild("SpawnedGems")
+    if not gemFolder then return end
+
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    for _, gem in pairs(gemFolder:GetChildren()) do
+        if gem:IsA("BasePart") or gem:IsA("Model") then
+            local touchInterest = gem:FindFirstChildWhichIsA("TouchTransmitter", true)
+            if touchInterest then
+                firetouchinterest(hrp, touchInterest.Parent, 0)
+                firetouchinterest(hrp, touchInterest.Parent, 1)
+            end
+        end
     end
 end)
 
@@ -415,6 +496,12 @@ FarmToggle.MouseButton1Click:Connect(function()
         isCurrentlyDamaging = false
         StatusLabel.Text = "Status: Idle" 
     end
+end)
+
+GemToggle.MouseButton1Click:Connect(function()
+    isGemFarming = not isGemFarming
+    GemToggle.Text = isGemFarming and "STOP GEM FARM" or "START AUTO GEM FARM"
+    GemToggle.BackgroundColor3 = isGemFarming and Color3.fromRGB(100, 40, 40) or Color3.fromRGB(40, 70, 100)
 end)
 
 task.spawn(function()
