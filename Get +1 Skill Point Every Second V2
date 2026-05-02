@@ -521,7 +521,7 @@ end)
 
 -- Chest Farm Logic
 task.spawn(function()
-    while task.wait(0.2) do
+    while task.wait(0.3) do
         if isChestFarming then
             pcall(function() OpenChestRemote:FireServer("BasicChest", 100) end)
             task.wait(0.05)
