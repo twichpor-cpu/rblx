@@ -1,0 +1,77 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Remotes = ReplicatedStorage:WaitForChild("RemoteEvents")
+
+-- GUI Setup
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "SimpleTrainer"
+ScreenGui.Parent = game:GetService("CoreGui")
+ScreenGui.ResetOnSpawn = false
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 220, 0, 150)
+MainFrame.Position = UDim2.new(0.5, -110, 0.5, -75)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local UIList = Instance.new("UIListLayout")
+UIList.Parent = MainFrame
+UIList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+UIList.Padding = UDim.new(0, 8)
+
+-- Padding for the top
+local TopPadding = Instance.new("Frame")
+TopPadding.Size = UDim2.new(1, 0, 0, 5)
+TopPadding.BackgroundTransparency = 1
+TopPadding.Parent = MainFrame
+
+local function MakeBtn(txt, callback)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0, 200, 0, 40)
+    b.Text = txt .. " [OFF]"
+    b.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.Font = Enum.Font.SourceSansBold
+    b.TextSize = 16
+    b.Parent = MainFrame
+    
+    local active = false
+    b.MouseButton1Click:Connect(function()
+        active = not active
+        b.Text = txt .. (active and " [ON]" or " [OFF]")
+        b.BackgroundColor3 = active and Color3.fromRGB(0, 160, 100) or Color3.fromRGB(45, 45, 45)
+        callback(active)
+    end)
+end
+
+-- 1. Fist Strength
+MakeBtn("Fist Strength", function(state)
+    _G.FS = state
+    while _G.FS do
+        local remote = Remotes:FindFirstChild("FS_Train")
+        if remote then remote:FireServer() end
+        task.wait(0.1)
+    end
+end)
+
+-- 2. Body Toughness
+MakeBtn("Body Toughness", function(state)
+    _G.BT = state
+    while _G.BT do
+        local remote = Remotes:FindFirstChild("BT_Train")
+        if remote then remote:FireServer() end
+        task.wait(0.1)
+    end
+end)
+
+-- Close Button
+local Close = Instance.new("TextButton")
+Close.Size = UDim2.new(0, 200, 0, 30)
+Close.Text = "CLOSE"
+Close.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+Close.TextColor3 = Color3.new(1, 1, 1)
+Close.Font = Enum.Font.SourceSansBold
+Close.Parent = MainFrame
+Close.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
