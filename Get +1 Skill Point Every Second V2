@@ -568,7 +568,9 @@ task.spawn(function()
     while task.wait(0.2) do
         if isChestFarming then
             pcall(function() OpenChestRemote:FireServer("BasicChest", 1) end)
+            task.wait(0.05)
             pcall(function() OpenChestRemote:FireServer("RareChest", 1) end)
+            task.wait(0.05)
             pcall(function() OpenChestRemote:FireServer("LegendaryChest", 1) end)
         end
     end
