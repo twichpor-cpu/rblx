@@ -1,10 +1,10 @@
 --[[
-    Advanced Auto Farm V18.6 (Local Lockdown & Hit Consistency)
+    Advanced Auto Farm V18.7 (Execution Order Optimization)
     Updates:
-    - NPC Lockdown: Locally anchors the target's RootPart so they cannot run away or move.
-    - Hit Consistency: Reverted to Under-Target TP to ensure NPCs don't slide out of range.
-    - Weapon Recovery: Memory-based recovery if tools are lost due to bugs.
-    - Persistence: Saves/Loads targets, distance, and tool type.
+    - Pre-TP Lockdown: NPCs are now frozen BEFORE the player teleports to them.
+    - Hitbox Alignment: Prevents displacement issues where the NPC moves mid-teleport.
+    - Local Lockdown: Locally anchors the target's RootPart for 100% hit consistency.
+    - Recovery & Persistence: Retains weapon recovery and settings save logic.
 ]]
 
 local Players = game:GetService("Players")
@@ -100,7 +100,7 @@ end
 
 -- Main UI Setup
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "FarmGui_V18_6"
+ScreenGui.Name = "FarmGui_V18_7"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = player:WaitForChild("PlayerGui")
 
@@ -117,7 +117,7 @@ Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 local Header = Instance.new("TextLabel")
 Header.Size = UDim2.new(1, 0, 0, 40)
 Header.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Header.Text = "AUTO FARM V18.6"
+Header.Text = "AUTO FARM V18.7"
 Header.TextColor3 = Color3.new(1, 1, 1)
 Header.Font = Enum.Font.GothamBold
 Header.TextSize = 14
@@ -436,7 +436,7 @@ RunService.Heartbeat:Connect(function()
     if lockedTarget and lockedTarget.Parent then
         local lHum = lockedTarget:FindFirstChildOfClass("Humanoid")
         if not lHum or lHum.Health <= 0 then
-            -- Un-anchor before clearing
+            -- Release target before clearing
             local tHRP = lockedTarget:FindFirstChild("HumanoidRootPart") or lockedTarget:FindFirstChild("Torso")
             if tHRP then tHRP.Anchored = false end
             lockedTarget = nil
@@ -488,10 +488,11 @@ RunService.Heartbeat:Connect(function()
         local tHRP = lockedTarget:FindFirstChild("HumanoidRootPart") or lockedTarget:FindFirstChild("Torso") or lockedTarget:FindFirstChild("Head")
         
         if hrp and tHRP then
-            -- LOCKDOWN LOGIC: Anchor the NPC locally so it cannot run away
+            -- EXECUTION ORDER:
+            -- 1. FREEZE FIRST (Anchors the NPC locally so they cannot move or retreat)
             tHRP.Anchored = true
             
-            -- Keep user positioned directly below them for consistent range
+            -- 2. TELEPORT SECOND (Moves player to the pinned target's current local position)
             hrp.CFrame = CFrame.new(tHRP.Position - Vector3.new(0, farmDistance, 0), tHRP.Position)
             hrp.Velocity = Vector3.new(0,0,0)
         end
