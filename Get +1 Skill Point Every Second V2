@@ -1,10 +1,10 @@
 --[[
-    Advanced Auto Farm V18.3 (Chests, Gems & Persistence)
+    Advanced Auto Farm V18.4 (Bug Fix & Weapon Recovery)
     Updates:
-    - Added Auto Open Chests: Loops Basic (x100), Rare (x1), and Legendary (x1).
-    - UI Reorg: Gem and Chest farm buttons are now side-by-side above the Auto Farm button.
+    - Added Weapon Recovery: If tool is missing, script force-clicks the UI to re-equip the last used weapon.
     - Persistence: Saves/Loads targets, distance, and tool type.
-    - Logic: Integrated Damage Locking and Multi-Select.
+    - UI: Organized Chest/Gem farm above Main Farm.
+    - Logic: Damage locking and multi-select remains active.
 ]]
 
 local Players = game:GetService("Players")
@@ -26,6 +26,7 @@ local currentToolType = "Physical"
 local farmDistance = 7 
 local isActivelyFarming = false 
 local lastEquipTime = 0
+local lastKnownWeaponName = nil -- Memory for the recovery bug
 
 -- Priority / Locking State
 local lockedTarget = nil
@@ -70,9 +71,14 @@ local CatList = ContentFrame:WaitForChild("CategoryList")
 local DetailsPanel = EnemyIndex:FindFirstChild("DetailsPanel") or EnemyIndex:WaitForChild("DetailsPanel", 5)
 local SkillGui = player:WaitForChild("PlayerGui"):WaitForChild("SkillPointGui")
 local StatsRows = SkillGui:WaitForChild("MainFrame"):WaitForChild("StatRowsFrame")
-local PhysicalItemsPath = ScreenGuiPath:WaitForChild("ItemsFrame"):WaitForChild("PhysicalItemsFrame")
-local MagicalItemsPath = ScreenGuiPath:WaitForChild("ItemsFrame"):WaitForChild("MagicalItemsFrame")
-local ItemInfo = ScreenGuiPath:WaitForChild("ItemsFrame"):FindFirstChild("ItemDamage") or ScreenGuiPath:WaitForChild("ItemsFrame"):WaitForChild("ItemDamage", 5)
+
+local ItemsFrame = ScreenGuiPath:WaitForChild("ItemsFrame")
+local PhysicalItemsTabBtn = ItemsFrame:WaitForChild("PhysicalItems")
+local MagicalItemsTabBtn = ItemsFrame:WaitForChild("MagicalItems")
+local PhysicalItemsPath = ItemsFrame:WaitForChild("PhysicalItemsFrame")
+local MagicalItemsPath = ItemsFrame:WaitForChild("MagicalItemsFrame")
+
+local ItemInfo = ItemsFrame:FindFirstChild("ItemDamage") or ItemsFrame:WaitForChild("ItemDamage", 5)
 local OpenChestRemote = ReplicatedStorage:WaitForChild("OpenChest")
 
 -- UI Helpers
@@ -94,7 +100,7 @@ end
 
 -- Main UI Setup
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "FarmGui_V18_3"
+ScreenGui.Name = "FarmGui_V18_4"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = player:WaitForChild("PlayerGui")
 
@@ -111,7 +117,7 @@ Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 local Header = Instance.new("TextLabel")
 Header.Size = UDim2.new(1, 0, 0, 40)
 Header.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Header.Text = "AUTO FARM V18.3"
+Header.Text = "AUTO FARM V18.4"
 Header.TextColor3 = Color3.new(1, 1, 1)
 Header.Font = Enum.Font.GothamBold
 Header.TextSize = 14
@@ -341,11 +347,58 @@ FarmToggle.BackgroundColor3 = Color3.fromRGB(40, 100, 40)
 FarmToggle.Font = Enum.Font.GothamBold
 FarmToggle.TextSize = 14
 
+-- Recover Logic: Force clicks the UI to find the button for the weapon
+local function attemptWeaponRecovery()
+    if not lastKnownWeaponName then return end
+    
+    StatusLabel.Text = "Bug Detected! Recovering: " .. lastKnownWeaponName
+    
+    -- 1. Fire category refresh
+    if currentToolType == "Physical" then
+        forceFire(PhysicalItemsTabBtn)
+    else
+        forceFire(MagicalItemsTabBtn)
+    end
+    
+    task.wait(0.2)
+    
+    -- 2. Find the button for the last weapon
+    local targetFrame = (currentToolType == "Physical") and PhysicalItemsPath or MagicalItemsPath
+    local buttonName = lastKnownWeaponName .. "_Button"
+    
+    -- Search for the button by name in the children
+    for _, child in pairs(targetFrame:GetChildren()) do
+        if child:IsA("Frame") and child.Name == "Template" then
+            local btn = child:FindFirstChild(buttonName) or child:FindFirstChildOfClass("ImageButton")
+            if btn and string.lower(btn.Name) == string.lower(buttonName) then
+                forceFire(btn)
+                return true
+            end
+        end
+    end
+    
+    -- Fallback: If not found by template name, just click the last available slot as suggested
+    local children = targetFrame:GetChildren()
+    if #children >= 2 then
+        -- Find the last button among children (indices vary due to layouts)
+        local lastValid = nil
+        for i = #children, 1, -1 do
+            if children[i]:IsA("Frame") and children[i].Name == "Template" then
+                lastValid = children[i]:FindFirstChildOfClass("ImageButton")
+                if lastValid then break end
+            end
+        end
+        if lastValid then forceFire(lastValid) end
+    end
+end
+
 -- Farm Logic
 local function getBestWeapon()
     local char = player.Character
     if not char then return nil end
     local referencePath = (currentToolType == "Physical") and PhysicalItemsPath or MagicalItemsPath
+    
+    -- Create a quick map of valid weapons from the UI
     local validNames = {}
     for _, t in pairs(referencePath:GetChildren()) do
         if t:IsA("Frame") and t.Name == "Template" then
@@ -353,8 +406,36 @@ local function getBestWeapon()
             if rb then validNames[string.gsub(rb.Name, "_Button", ""):lower()] = true end
         end
     end
-    for _, tool in pairs(char:GetChildren()) do if tool:IsA("Tool") and validNames[tool.Name:lower()] then return tool end end
-    for _, tool in pairs(player.Backpack:GetChildren()) do if tool:IsA("Tool") and validNames[tool.Name:lower()] then return tool end end
+    
+    -- Check character and backpack
+    local foundTool = nil
+    for _, tool in pairs(char:GetChildren()) do 
+        if tool:IsA("Tool") and validNames[tool.Name:lower()] then 
+            foundTool = tool 
+            break
+        end 
+    end
+    
+    if not foundTool then
+        for _, tool in pairs(player.Backpack:GetChildren()) do 
+            if tool:IsA("Tool") and validNames[tool.Name:lower()] then 
+                foundTool = tool 
+                break
+            end 
+        end
+    end
+    
+    if foundTool then
+        lastKnownWeaponName = foundTool.Name -- Update memory
+        return foundTool
+    end
+
+    -- Trigger Recovery if no tool found and we have a memory of what we should have
+    if lastKnownWeaponName and tick() - lastEquipTime > 2 then
+        lastEquipTime = tick()
+        attemptWeaponRecovery()
+    end
+
     return player.Backpack:FindFirstChildOfClass("Tool") or char:FindFirstChildOfClass("Tool")
 end
 
@@ -431,7 +512,7 @@ RunService.Heartbeat:Connect(function()
         local tool = getBestWeapon()
         if not tool then
             isActivelyFarming = false
-            StatusLabel.Text = "Status: No Tool Found"
+            StatusLabel.Text = "Status: No Tool (Recovering...)"
             return
         end
         
@@ -486,13 +567,8 @@ end)
 task.spawn(function()
     while task.wait(0.2) do
         if isChestFarming then
-            -- Open Basic x1
             pcall(function() OpenChestRemote:FireServer("BasicChest", 1) end)
-            task.wait(0.05)
-            -- Open Rare x1
             pcall(function() OpenChestRemote:FireServer("RareChest", 1) end)
-            task.wait(0.05)
-            -- Open Legendary x1
             pcall(function() OpenChestRemote:FireServer("LegendaryChest", 1) end)
         end
     end
