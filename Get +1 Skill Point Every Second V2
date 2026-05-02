@@ -535,7 +535,7 @@ RunService.Heartbeat:Connect(function()
         local tHRP = lockedTarget:FindFirstChild("HumanoidRootPart") or lockedTarget:FindFirstChild("Torso") or lockedTarget:FindFirstChild("Head")
         
         if hrp and tHRP then
-            hrp.CFrame = CFrame.new(tHRP.Position - Vector3.new(0, farmDistance, 0), tHRP.Position)
+            hrp.CFrame = CFrame.new(tHRP.Position - Vector3.new(0, 0, farmDistance), tHRP.Position)
             hrp.Velocity = Vector3.new(0,0,0)
         end
 
