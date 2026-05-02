@@ -1,10 +1,10 @@
 --[[
-    Advanced Auto Farm V18.4 (Bug Fix & Weapon Recovery)
+    Advanced Auto Farm V18.6 (Local Lockdown & Hit Consistency)
     Updates:
-    - Added Weapon Recovery: If tool is missing, script force-clicks the UI to re-equip the last used weapon.
+    - NPC Lockdown: Locally anchors the target's RootPart so they cannot run away or move.
+    - Hit Consistency: Reverted to Under-Target TP to ensure NPCs don't slide out of range.
+    - Weapon Recovery: Memory-based recovery if tools are lost due to bugs.
     - Persistence: Saves/Loads targets, distance, and tool type.
-    - UI: Organized Chest/Gem farm above Main Farm.
-    - Logic: Damage locking and multi-select remains active.
 ]]
 
 local Players = game:GetService("Players")
@@ -26,7 +26,7 @@ local currentToolType = "Physical"
 local farmDistance = 7 
 local isActivelyFarming = false 
 local lastEquipTime = 0
-local lastKnownWeaponName = nil -- Memory for the recovery bug
+local lastKnownWeaponName = nil 
 
 -- Priority / Locking State
 local lockedTarget = nil
@@ -100,7 +100,7 @@ end
 
 -- Main UI Setup
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "FarmGui_V18_4"
+ScreenGui.Name = "FarmGui_V18_6"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = player:WaitForChild("PlayerGui")
 
@@ -117,7 +117,7 @@ Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 local Header = Instance.new("TextLabel")
 Header.Size = UDim2.new(1, 0, 0, 40)
 Header.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Header.Text = "AUTO FARM V18.4"
+Header.Text = "AUTO FARM V18.6"
 Header.TextColor3 = Color3.new(1, 1, 1)
 Header.Font = Enum.Font.GothamBold
 Header.TextSize = 14
@@ -347,48 +347,19 @@ FarmToggle.BackgroundColor3 = Color3.fromRGB(40, 100, 40)
 FarmToggle.Font = Enum.Font.GothamBold
 FarmToggle.TextSize = 14
 
--- Recover Logic: Force clicks the UI to find the button for the weapon
+-- Recover Logic
 local function attemptWeaponRecovery()
     if not lastKnownWeaponName then return end
-    
     StatusLabel.Text = "Bug Detected! Recovering: " .. lastKnownWeaponName
-    
-    -- 1. Fire category refresh
-    if currentToolType == "Physical" then
-        forceFire(PhysicalItemsTabBtn)
-    else
-        forceFire(MagicalItemsTabBtn)
-    end
-    
+    if currentToolType == "Physical" then forceFire(PhysicalItemsTabBtn) else forceFire(MagicalItemsTabBtn) end
     task.wait(0.2)
-    
-    -- 2. Find the button for the last weapon
     local targetFrame = (currentToolType == "Physical") and PhysicalItemsPath or MagicalItemsPath
     local buttonName = lastKnownWeaponName .. "_Button"
-    
-    -- Search for the button by name in the children
     for _, child in pairs(targetFrame:GetChildren()) do
         if child:IsA("Frame") and child.Name == "Template" then
             local btn = child:FindFirstChild(buttonName) or child:FindFirstChildOfClass("ImageButton")
-            if btn and string.lower(btn.Name) == string.lower(buttonName) then
-                forceFire(btn)
-                return true
-            end
+            if btn and string.lower(btn.Name) == string.lower(buttonName) then forceFire(btn) return true end
         end
-    end
-    
-    -- Fallback: If not found by template name, just click the last available slot as suggested
-    local children = targetFrame:GetChildren()
-    if #children >= 2 then
-        -- Find the last button among children (indices vary due to layouts)
-        local lastValid = nil
-        for i = #children, 1, -1 do
-            if children[i]:IsA("Frame") and children[i].Name == "Template" then
-                lastValid = children[i]:FindFirstChildOfClass("ImageButton")
-                if lastValid then break end
-            end
-        end
-        if lastValid then forceFire(lastValid) end
     end
 end
 
@@ -397,8 +368,6 @@ local function getBestWeapon()
     local char = player.Character
     if not char then return nil end
     local referencePath = (currentToolType == "Physical") and PhysicalItemsPath or MagicalItemsPath
-    
-    -- Create a quick map of valid weapons from the UI
     local validNames = {}
     for _, t in pairs(referencePath:GetChildren()) do
         if t:IsA("Frame") and t.Name == "Template" then
@@ -406,43 +375,26 @@ local function getBestWeapon()
             if rb then validNames[string.gsub(rb.Name, "_Button", ""):lower()] = true end
         end
     end
-    
-    -- Check character and backpack
     local foundTool = nil
     for _, tool in pairs(char:GetChildren()) do 
-        if tool:IsA("Tool") and validNames[tool.Name:lower()] then 
-            foundTool = tool 
-            break
-        end 
+        if tool:IsA("Tool") and validNames[tool.Name:lower()] then foundTool = tool break end 
     end
-    
     if not foundTool then
         for _, tool in pairs(player.Backpack:GetChildren()) do 
-            if tool:IsA("Tool") and validNames[tool.Name:lower()] then 
-                foundTool = tool 
-                break
-            end 
+            if tool:IsA("Tool") and validNames[tool.Name:lower()] then foundTool = tool break end 
         end
     end
-    
-    if foundTool then
-        lastKnownWeaponName = foundTool.Name -- Update memory
-        return foundTool
-    end
-
-    -- Trigger Recovery if no tool found and we have a memory of what we should have
+    if foundTool then lastKnownWeaponName = foundTool.Name return foundTool end
     if lastKnownWeaponName and tick() - lastEquipTime > 2 then
         lastEquipTime = tick()
         attemptWeaponRecovery()
     end
-
     return player.Backpack:FindFirstChildOfClass("Tool") or char:FindFirstChildOfClass("Tool")
 end
 
 local function findBestNewTarget()
     local userDmg = getUserDamage()
     local possibleEntries = {}
-
     for _, obj in pairs(workspace:GetChildren()) do
         if obj:IsA("Folder") and (string.find(obj.Name, "Enemies") or obj.Name == "Bosses" or string.find(obj.Name, "Knights") or obj.Name == "Slimes") then
             for _, item in pairs(obj:GetChildren()) do
@@ -451,7 +403,6 @@ local function findBestNewTarget()
                     for selectedName, _ in pairs(selectedTargets) do
                         if string.find(item.Name:lower(), selectedName:lower()) then matchFound = true; break end
                     end
-
                     if matchFound then
                         local hum = item:FindFirstChildOfClass("Humanoid")
                         local hrp = item:FindFirstChild("HumanoidRootPart") or item:FindFirstChild("Torso") or item:FindFirstChild("Head")
@@ -464,7 +415,6 @@ local function findBestNewTarget()
             end
         end
     end
-
     if #possibleEntries > 0 then
         table.sort(possibleEntries, function(a, b) return a.hp < b.hp end)
         for _, entry in ipairs(possibleEntries) do
@@ -486,6 +436,9 @@ RunService.Heartbeat:Connect(function()
     if lockedTarget and lockedTarget.Parent then
         local lHum = lockedTarget:FindFirstChildOfClass("Humanoid")
         if not lHum or lHum.Health <= 0 then
+            -- Un-anchor before clearing
+            local tHRP = lockedTarget:FindFirstChild("HumanoidRootPart") or lockedTarget:FindFirstChild("Torso")
+            if tHRP then tHRP.Anchored = false end
             lockedTarget = nil
             isCurrentlyDamaging = false
         else
@@ -535,7 +488,11 @@ RunService.Heartbeat:Connect(function()
         local tHRP = lockedTarget:FindFirstChild("HumanoidRootPart") or lockedTarget:FindFirstChild("Torso") or lockedTarget:FindFirstChild("Head")
         
         if hrp and tHRP then
-            hrp.CFrame = CFrame.new(tHRP.Position - Vector3.new(0, 0, farmDistance), tHRP.Position)
+            -- LOCKDOWN LOGIC: Anchor the NPC locally so it cannot run away
+            tHRP.Anchored = true
+            
+            -- Keep user positioned directly below them for consistent range
+            hrp.CFrame = CFrame.new(tHRP.Position - Vector3.new(0, farmDistance, 0), tHRP.Position)
             hrp.Velocity = Vector3.new(0,0,0)
         end
 
@@ -553,7 +510,6 @@ RunService.Heartbeat:Connect(function()
     if not gemFolder then return end
     local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
-
     for _, gem in pairs(gemFolder:GetChildren()) do
         local touchInterest = gem:FindFirstChildWhichIsA("TouchTransmitter", true)
         if touchInterest then
@@ -567,7 +523,7 @@ end)
 task.spawn(function()
     while task.wait(0.2) do
         if isChestFarming then
-            pcall(function() OpenChestRemote:FireServer("BasicChest", 1) end)
+            pcall(function() OpenChestRemote:FireServer("BasicChest", 100) end)
             task.wait(0.05)
             pcall(function() OpenChestRemote:FireServer("RareChest", 1) end)
             task.wait(0.05)
@@ -588,7 +544,16 @@ FarmToggle.MouseButton1Click:Connect(function()
     isAutoFarming = not isAutoFarming
     FarmToggle.Text = isAutoFarming and "STOP MAIN AUTO FARM" or "START MAIN AUTO FARM"
     FarmToggle.BackgroundColor3 = isAutoFarming and Color3.fromRGB(100, 40, 40) or Color3.fromRGB(40, 100, 40)
-    if not isAutoFarming then lockedTarget = nil isCurrentlyDamaging = false StatusLabel.Text = "Status: Idle" end
+    
+    if not isAutoFarming then 
+        if lockedTarget then
+            local tHRP = lockedTarget:FindFirstChild("HumanoidRootPart") or lockedTarget:FindFirstChild("Torso")
+            if tHRP then tHRP.Anchored = false end
+        end
+        lockedTarget = nil 
+        isCurrentlyDamaging = false 
+        StatusLabel.Text = "Status: Idle" 
+    end
 end)
 
 GemToggle.MouseButton1Click:Connect(function()
