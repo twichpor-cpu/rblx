@@ -1,10 +1,12 @@
 --[[
-    Advanced Auto Farm V18.8 (Freeze Removed)
+    Advanced Auto Farm V18.9 (Center-Lock Logic)
     Updates:
-    - Removed Lockdown Logic: NPCs are no longer anchored/frozen to avoid physics glitches.
-    - Fluid Tracking: Returns to dynamic TP following.
-    - Improved Stability: Better cleanup of target variables when farming is toggled off.
-    - Recovery & Persistence: Retains weapon recovery and settings save logic.
+    - Center-Lock System: Replaces basic TP with a high-frequency CFrame lock.
+    - Anti-Offset: Forces the player to remain perfectly centered under the NPC to prevent AI "fleeing."
+    - Velocity Nullification: Aggressively sets velocity to 0 to prevent animation-based drifting.
+    - RenderStepped Alignment: Syncs movement with the camera/render for maximum precision.
+    - Equip-First Logic: Teleportation now waits until the weapon is successfully equipped.
+    - Settings Persistence: Now saves Auto Gems and Auto Chests states.
 ]]
 
 local Players = game:GetService("Players")
@@ -40,7 +42,9 @@ local function saveSettings()
     local data = {
         selectedTargets = selectedTargets,
         currentToolType = currentToolType,
-        farmDistance = farmDistance
+        farmDistance = farmDistance,
+        isGemFarming = isGemFarming,
+        isChestFarming = isChestFarming
     }
     pcall(function()
         if writefile then
@@ -56,6 +60,8 @@ local function loadSettings()
             if data.selectedTargets then selectedTargets = data.selectedTargets end
             if data.currentToolType then currentToolType = data.currentToolType end
             if data.farmDistance then farmDistance = data.farmDistance end
+            if data.isGemFarming ~= nil then isGemFarming = data.isGemFarming end
+            if data.isChestFarming ~= nil then isChestFarming = data.isChestFarming end
         end
     end)
 end
@@ -100,7 +106,7 @@ end
 
 -- Main UI Setup
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "FarmGui_V18_8"
+ScreenGui.Name = "FarmGui_V18_9"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = player:WaitForChild("PlayerGui")
 
@@ -117,7 +123,7 @@ Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 local Header = Instance.new("TextLabel")
 Header.Size = UDim2.new(1, 0, 0, 40)
 Header.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Header.Text = "AUTO FARM V18.8"
+Header.Text = "AUTO FARM V18.9"
 Header.TextColor3 = Color3.new(1, 1, 1)
 Header.Font = Enum.Font.GothamBold
 Header.TextSize = 14
@@ -200,10 +206,10 @@ TabBar.Position = UDim2.new(0, 10, 0, 85)
 TabBar.BackgroundTransparency = 1
 TabBar.Parent = MainFrame
 
-local function createBtn(text, pos, size, parent)
+local function createBtn(text, post, size, parent)
     local btn = Instance.new("TextButton")
     btn.Size = size
-    btn.Position = pos
+    btn.Position = post
     btn.Text = text
     btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
     btn.TextColor3 = Color3.new(1, 1, 1)
@@ -347,6 +353,16 @@ FarmToggle.BackgroundColor3 = Color3.fromRGB(40, 100, 40)
 FarmToggle.Font = Enum.Font.GothamBold
 FarmToggle.TextSize = 14
 
+-- Update visual state of Gem/Chest toggles based on loaded settings
+local function updateTogglesUI()
+    GemToggle.Text = isGemFarming and "GEMS: ON" or "AUTO GEMS"
+    GemToggle.BackgroundColor3 = isGemFarming and Color3.fromRGB(30, 120, 180) or Color3.fromRGB(40, 70, 100)
+    
+    ChestToggle.Text = isChestFarming and "CHESTS: ON" or "AUTO CHESTS"
+    ChestToggle.BackgroundColor3 = isChestFarming and Color3.fromRGB(180, 120, 30) or Color3.fromRGB(100, 70, 40)
+end
+updateTogglesUI()
+
 -- Recover Logic
 local function attemptWeaponRecovery()
     if not lastKnownWeaponName then return end
@@ -425,7 +441,7 @@ local function findBestNewTarget()
     return nil
 end
 
--- NPC Farm Loop
+-- NPC Farm Loop (Scanning & State Management)
 RunService.Heartbeat:Connect(function()
     if not isAutoFarming then isActivelyFarming = false lockedTarget = nil return end
     
@@ -460,40 +476,64 @@ RunService.Heartbeat:Connect(function()
 
     if lockedTarget then
         local tool = getBestWeapon()
-        if not tool then
-            isActivelyFarming = false
-            StatusLabel.Text = "Status: No Tool (Recovering...)"
-            return
-        end
-        
-        if tool.Parent ~= char then
-            isActivelyFarming = false
-            StatusLabel.Text = "Status: Equipping " .. tool.Name
+        if tool and tool.Parent ~= char then
+            -- Equip weapon before we start actively farming or locking position
             if tick() - lastEquipTime > 0.8 then
                 lastEquipTime = tick()
                 hum:EquipTool(tool)
             end
-            return 
+        elseif tool and tool.Parent == char then
+            -- Once tool is in hand, we start the combat sequence
+            isActivelyFarming = true
+            -- A tiny task.wait here helps the game process the equip before activating
+            task.spawn(function()
+                task.wait(0.1) 
+                if tool and tool.Parent == char then
+                    tool:Activate()
+                end
+            end)
         end
-
-        isActivelyFarming = true
-        local tHum = lockedTarget:FindFirstChildOfClass("Humanoid")
-        local displayHP = lockedTarget:GetAttribute("BaseHealth") or (tHum and tHum.Health) or 0
-        StatusLabel.Text = (isCurrentlyDamaging and "DAMAGING: " or "Targeting: ") .. lockedTarget.Name .. " (" .. displayHP .. " HP)"
-        
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        local tHRP = lockedTarget:FindFirstChild("HumanoidRootPart") or lockedTarget:FindFirstChild("Torso") or lockedTarget:FindFirstChild("Head")
-        
-        if hrp and tHRP then
-            -- TELEPORT LOGIC (Freeze removed as requested)
-            hrp.CFrame = CFrame.new(tHRP.Position - Vector3.new(0, farmDistance, 0), tHRP.Position)
-            hrp.Velocity = Vector3.new(0,0,0)
-        end
-
-        if tool.Parent == char then tool:Activate() end
     else
         isActivelyFarming = false
-        StatusLabel.Text = "Searching Selected Pool..."
+    end
+end)
+
+-- POSITION LOCKING SYSTEM (Combat Realignment)
+RunService.RenderStepped:Connect(function()
+    if not isAutoFarming or not lockedTarget then return end
+    
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    
+    -- Check if tool is equipped. 
+    -- Fine Tuning: We only TP if the tool is actually in the Character's hand.
+    local toolInHand = char and char:FindFirstChildOfClass("Tool")
+    
+    if hrp and toolInHand then
+        local tHRP = lockedTarget:FindFirstChild("HumanoidRootPart") or lockedTarget:FindFirstChild("Torso") or lockedTarget:FindFirstChild("Head")
+        if tHRP then
+            -- Lock CFrame to center under NPC
+            hrp.CFrame = CFrame.new(tHRP.Position - Vector3.new(0, farmDistance, 0), tHRP.Position)
+            hrp.Velocity = Vector3.new(0,0,0)
+            hrp.RotVelocity = Vector3.new(0,0,0)
+        end
+    end
+end)
+
+-- Status Updates
+task.spawn(function()
+    while task.wait(0.1) do
+        if isAutoFarming then
+            if lockedTarget then
+                local tHum = lockedTarget:FindFirstChildOfClass("Humanoid")
+                local displayHP = lockedTarget:GetAttribute("BaseHealth") or (tHum and tHum.Health) or 0
+                StatusLabel.Text = (isCurrentlyDamaging and "DAMAGING: " or "Targeting: ") .. lockedTarget.Name .. " (" .. displayHP .. " HP)"
+            else
+                StatusLabel.Text = "Searching Selected Pool..."
+            end
+        else
+            StatusLabel.Text = "Status: Idle"
+        end
     end
 end)
 
@@ -526,6 +566,7 @@ task.spawn(function()
     end
 end)
 
+-- Noclip
 RunService.Stepped:Connect(function()
     if isAutoFarming and isActivelyFarming and player.Character then
         for _, part in pairs(player.Character:GetDescendants()) do
@@ -542,20 +583,19 @@ FarmToggle.MouseButton1Click:Connect(function()
     if not isAutoFarming then 
         lockedTarget = nil 
         isCurrentlyDamaging = false 
-        StatusLabel.Text = "Status: Idle" 
     end
 end)
 
 GemToggle.MouseButton1Click:Connect(function()
     isGemFarming = not isGemFarming
-    GemToggle.Text = isGemFarming and "GEMS: ON" or "AUTO GEMS"
-    GemToggle.BackgroundColor3 = isGemFarming and Color3.fromRGB(30, 120, 180) or Color3.fromRGB(40, 70, 100)
+    saveSettings() -- Save state
+    updateTogglesUI()
 end)
 
 ChestToggle.MouseButton1Click:Connect(function()
     isChestFarming = not isChestFarming
-    ChestToggle.Text = isChestFarming and "CHESTS: ON" or "AUTO CHESTS"
-    ChestToggle.BackgroundColor3 = isChestFarming and Color3.fromRGB(180, 120, 30) or Color3.fromRGB(100, 70, 40)
+    saveSettings() -- Save state
+    updateTogglesUI()
 end)
 
 task.spawn(function()
