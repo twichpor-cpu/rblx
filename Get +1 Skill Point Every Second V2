@@ -5,16 +5,11 @@ local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
 -- Remote Paths
-local ByteNet = ReplicatedStorage:WaitForChild("ByteNetReliable")
 local AcceptQuestRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("AcceptQuest")
 
 -- Configuration
 local SETTINGS = {
-    MissionName = "Extermination",
-    AttackDelay = 0.15, -- Reduced for faster XP (Higher CPS)
-    CombatBuffer = buffer.fromstring("\x06\x0d\x00CombatVisuals\x01\x02\x00m1\xAB\xAA\xAA>\x05\x00swing"),
-    AutoFarmEnabled = false,
-    LastQuestTime = 0
+    MissionName = "Extermination"
 }
 
 -- UI Helpers (Advanced Force-Fire Logic)
@@ -37,46 +32,39 @@ local function forceFire(button)
     end)
 end
 
--- Functions
-local function performAttack()
-    ByteNet:FireServer(SETTINGS.CombatBuffer)
-end
-
 -- Helper to find the actual Game Quest Button
 local function getGameQuestButton()
-    local path = LocalPlayer.PlayerGui:FindFirstChild("MissionBoardGui")
-        and LocalPlayer.PlayerGui.MissionBoardGui:FindFirstChild("MainFrame")
-        and LocalPlayer.PlayerGui.MissionBoardGui.MainFrame:FindFirstChild("MissionList")
-        and LocalPlayer.PlayerGui.MissionBoardGui.MainFrame.MissionList:FindFirstChild(SETTINGS.MissionName)
-        and LocalPlayer.PlayerGui.MissionBoardGui.MainFrame.MissionList[SETTINGS.MissionName]:FindFirstChild("TextButton")
-    return path
+    local gui = LocalPlayer.PlayerGui:FindFirstChild("MissionBoardGui")
+    local btn = gui and gui:FindFirstChild("MainFrame")
+        and gui.MainFrame:FindFirstChild("MissionList")
+        and gui.MainFrame.MissionList:FindFirstChild(SETTINGS.MissionName)
+        and gui.MainFrame.MissionList[SETTINGS.MissionName]:FindFirstChild("TextButton")
+    return btn
 end
 
--- Method 1: Direct Remote Fire
-local function acceptMissionRemote()
-    print("Sending Remote request for mission: " .. SETTINGS.MissionName)
-    AcceptQuestRemote:FireServer(SETTINGS.MissionName)
-end
-
--- Method 2: Proximity Prompt Interaction
+-- Interaction
 local function triggerMissionPrompt()
     local prompt = Workspace:FindFirstChild("MissionBoard") 
         and Workspace.MissionBoard:FindFirstChild("Fabric") 
         and Workspace.MissionBoard.Fabric:FindFirstChild("MissionBoardPrompt")
     
     if prompt then
-        fireproximityprompt(prompt, 20) 
-    end
-end
-
--- Method 3: UI Force-Fire
-local function forceFireUIButton()
-    local btn = getGameQuestButton()
-    if btn then
-        forceFire(btn)
+        fireproximityprompt(prompt, 30) 
         return true
     end
     return false
+end
+
+-- Acceptance Logic (Direct from Manual Accept method)
+local function executeAcceptance()
+    local btn = getGameQuestButton()
+    if btn then
+        forceFire(btn)
+        task.wait(0.05)
+        forceFire(btn) -- Double fire for safety
+    end
+    -- Direct remote call as a fallback
+    AcceptQuestRemote:FireServer(SETTINGS.MissionName)
 end
 
 -----------------------------------------------------------
@@ -89,9 +77,9 @@ screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 screenGui.ResetOnSpawn = false
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 220, 0, 280)
-mainFrame.Position = UDim2.new(0.5, -110, 0.5, -140)
-mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+mainFrame.Size = UDim2.new(0, 220, 0, 180) -- Smaller frame since Auto is gone
+mainFrame.Position = UDim2.new(0.5, -110, 0.5, -90)
+mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 mainFrame.BorderSizePixel = 0
 mainFrame.Active = true
 mainFrame.Draggable = true
@@ -99,130 +87,86 @@ mainFrame.Parent = screenGui
 Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
 
 local title = Instance.new("TextLabel")
-title.Text = "FARM MANAGER V3 - TURBO"
-title.Size = UDim2.new(1, 0, 0, 35)
-title.BackgroundColor3 = Color3.fromRGB(40, 20, 20) 
+title.Text = "QUEST UTILITY V5"
+title.Size = UDim2.new(1, -30, 0, 35)
+title.BackgroundColor3 = Color3.fromRGB(35, 15, 15) 
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
 title.Font = Enum.Font.GothamBold
-title.TextSize = 14
+title.TextSize = 13
 title.Parent = mainFrame
 Instance.new("UICorner", title).CornerRadius = UDim.new(0, 8)
 
--- Status Label for Timer
+local closeBtn = Instance.new("TextButton")
+closeBtn.Text = "X"
+closeBtn.Size = UDim2.new(0, 30, 0, 35)
+closeBtn.Position = UDim2.new(1, -30, 0, 0)
+closeBtn.BackgroundColor3 = Color3.fromRGB(50, 20, 20)
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.Parent = mainFrame
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
+
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Size = UDim2.new(1, -20, 0, 20)
 statusLabel.Position = UDim2.new(0, 10, 0, 40)
 statusLabel.BackgroundTransparency = 1
-statusLabel.Text = "Status: Idle"
-statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+statusLabel.Text = "Monitoring Extermination..."
+statusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
 statusLabel.Font = Enum.Font.Gotham
-statusLabel.TextSize = 12
+statusLabel.TextSize = 11
 statusLabel.Parent = mainFrame
 
-local toggleFarmBtn = Instance.new("TextButton")
-toggleFarmBtn.Text = "START TURBO FARM"
-toggleFarmBtn.Size = UDim2.new(0, 200, 0, 50)
-toggleFarmBtn.Position = UDim2.new(0, 10, 0, 70)
-toggleFarmBtn.BackgroundColor3 = Color3.fromRGB(40, 100, 40)
-toggleFarmBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleFarmBtn.Font = Enum.Font.GothamBold
-toggleFarmBtn.Parent = mainFrame
-Instance.new("UICorner", toggleFarmBtn).CornerRadius = UDim.new(0, 5)
+local openMenuBtn = Instance.new("TextButton")
+openMenuBtn.Text = "Open Mission Board"
+openMenuBtn.Size = UDim2.new(0, 200, 0, 40)
+openMenuBtn.Position = UDim2.new(0, 10, 0, 70)
+openMenuBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 70)
+openMenuBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+openMenuBtn.Font = Enum.Font.GothamBold
+openMenuBtn.Parent = mainFrame
+Instance.new("UICorner", openMenuBtn).CornerRadius = UDim.new(0, 5)
 
 local acceptBtn = Instance.new("TextButton")
-acceptBtn.Text = "Manual Accept"
-acceptBtn.Size = UDim2.new(0, 200, 0, 35)
-acceptBtn.Position = UDim2.new(0, 10, 0, 130)
-acceptBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+acceptBtn.Text = "Force Accept Quest"
+acceptBtn.Size = UDim2.new(0, 200, 0, 40)
+acceptBtn.Position = UDim2.new(0, 10, 0, 120)
+acceptBtn.BackgroundColor3 = Color3.fromRGB(40, 100, 40)
 acceptBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-acceptBtn.Font = Enum.Font.Gotham
+acceptBtn.Font = Enum.Font.GothamBold
 acceptBtn.Parent = mainFrame
 Instance.new("UICorner", acceptBtn).CornerRadius = UDim.new(0, 5)
-
-local closeBtn = Instance.new("TextButton")
-closeBtn.Text = "Exit Script"
-closeBtn.Size = UDim2.new(0, 200, 0, 35)
-closeBtn.Position = UDim2.new(0, 10, 0, 230)
-closeBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
-closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-closeBtn.Font = Enum.Font.Gotham
-closeBtn.Parent = mainFrame
-Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 5)
 
 -----------------------------------------------------------
 -- LOGIC
 -----------------------------------------------------------
 
--- Background Status Sync (Reads directly from Game UI)
+-- Keep status label updated with the current button state
 task.spawn(function()
     while true do
-        if SETTINGS.AutoFarmEnabled then
-            local gameBtn = getGameQuestButton()
-            if gameBtn then
-                local btnText = gameBtn.Text
-                if btnText == "Accept" then
-                    statusLabel.Text = "Status: Ready!"
-                    statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-                else
-                    statusLabel.Text = "Next Quest: " .. btnText
-                    statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
-                end
+        local gameBtn = getGameQuestButton()
+        if gameBtn then
+            statusLabel.Text = "State: " .. gameBtn.Text
+            if gameBtn.Text == "Accept" then
+                statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
             else
-                statusLabel.Text = "Status: Open Mission Board"
-                statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+                statusLabel.TextColor3 = Color3.fromRGB(255, 180, 50)
             end
+        else
+            statusLabel.Text = "Board Not Found"
+            statusLabel.TextColor3 = Color3.fromRGB(200, 50, 50)
         end
-        task.wait(0.5) -- Fast refresh for accurate countdown
+        task.wait(0.5)
     end
 end)
 
--- Manual Accept click
-acceptBtn.MouseButton1Click:Connect(function()
+openMenuBtn.MouseButton1Click:Connect(function()
     triggerMissionPrompt()
-    task.wait(0.6)
-    forceFireUIButton()
-    acceptMissionRemote()
 end)
 
--- Toggle Auto-Farm
-toggleFarmBtn.MouseButton1Click:Connect(function()
-    SETTINGS.AutoFarmEnabled = not SETTINGS.AutoFarmEnabled
-    
-    if SETTINGS.AutoFarmEnabled then
-        toggleFarmBtn.Text = "STOP TURBO FARM"
-        toggleFarmBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
-        
-        task.spawn(function()
-            while SETTINGS.AutoFarmEnabled do
-                local gameBtn = getGameQuestButton()
-                
-                -- Check the actual button text to decide whether to accept
-                if gameBtn and gameBtn.Text == "Accept" then
-                    triggerMissionPrompt()
-                    task.wait(0.7)
-                    forceFireUIButton()
-                    acceptMissionRemote()
-                    task.wait(1) -- Cool down after acceptance
-                end
-                
-                -- Combat Cycle
-                for i = 1, 40 do
-                    if not SETTINGS.AutoFarmEnabled then break end
-                    performAttack()
-                    task.wait(SETTINGS.AttackDelay)
-                end
-                task.wait(0.2)
-            end
-        end)
-    else
-        toggleFarmBtn.Text = "START TURBO FARM"
-        toggleFarmBtn.BackgroundColor3 = Color3.fromRGB(40, 100, 40)
-        statusLabel.Text = "Status: Idle"
-        statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-    end
+acceptBtn.MouseButton1Click:Connect(function()
+    executeAcceptance()
 end)
 
 closeBtn.MouseButton1Click:Connect(function()
-    SETTINGS.AutoFarmEnabled = false 
     screenGui:Destroy()
 end)
