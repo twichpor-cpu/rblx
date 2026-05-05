@@ -5,60 +5,66 @@ local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
 -- Remote Paths
-local ByteNet = ReplicatedStorage:WaitForChild("ByteNetReliable")
 local AcceptQuestRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("AcceptQuest")
 
 -- Configuration
 local SETTINGS = {
-    MissionName = "Extermination",
-    AttackDelay = 0.3,
-    CombatBuffer = buffer.fromstring("\x06\x0d\x00CombatVisuals\x01\x02\x00m1\xAB\xAA\xAA>\x05\x00swing"),
-    AutoFarmEnabled = false
+    MissionName = "Extermination"
 }
 
--- Functions
-local function performAttack()
-    ByteNet:FireServer(SETTINGS.CombatBuffer)
+-- UI Helpers (Advanced Force-Fire Logic)
+local function forceFire(button)
+    if not button then return end 
+    pcall(function()
+        local events = {"MouseButton1Click", "MouseButton1Down", "Activated"}
+        for _, eventName in pairs(events) do
+            local signal = button:FindFirstChild(eventName) or button[eventName]
+            if signal then
+                for _, connection in pairs(getconnections(signal)) do
+                    if connection.Function then 
+                        task.spawn(connection.Function)
+                    elseif connection.Fire then 
+                        connection:Fire() 
+                    end
+                end
+            end
+        end
+    end)
 end
 
--- Method 1: Direct Remote Fire (Cleanest)
-local function acceptMissionRemote()
-    print("Sending Remote request for mission: " .. SETTINGS.MissionName)
-    AcceptQuestRemote:FireServer(SETTINGS.MissionName)
+-- Helper to find the actual Game Quest Button
+local function getGameQuestButton()
+    local gui = LocalPlayer.PlayerGui:FindFirstChild("MissionBoardGui")
+    local btn = gui and gui:FindFirstChild("MainFrame")
+        and gui.MainFrame:FindFirstChild("MissionList")
+        and gui.MainFrame.MissionList:FindFirstChild(SETTINGS.MissionName)
+        and gui.MainFrame.MissionList[SETTINGS.MissionName]:FindFirstChild("TextButton")
+    return btn
 end
 
--- Method 2: Proximity Prompt Interaction
+-- Interaction
 local function triggerMissionPrompt()
     local prompt = Workspace:FindFirstChild("MissionBoard") 
         and Workspace.MissionBoard:FindFirstChild("Fabric") 
         and Workspace.MissionBoard.Fabric:FindFirstChild("MissionBoardPrompt")
     
     if prompt then
-        print("Triggering Mission Board Prompt...")
-        -- Using fireproximityprompt or simulate interaction
-        fireproximityprompt(prompt, 20) 
-    else
-        warn("MissionBoardPrompt not found in workspace!")
+        fireproximityprompt(prompt, 30) 
+        return true
     end
+    return false
 end
 
--- Method 3: UI Force-Fire (Simulates clicking the list item)
-local function forceFireUIButton()
-    local btnPath = LocalPlayer.PlayerGui:FindFirstChild("MissionBoardGui")
-        and LocalPlayer.PlayerGui.MissionBoardGui:FindFirstChild("MainFrame")
-        and LocalPlayer.PlayerGui.MissionBoardGui.MainFrame:FindFirstChild("MissionList")
-        and LocalPlayer.PlayerGui.MissionBoardGui.MainFrame.MissionList:FindFirstChild(SETTINGS.MissionName)
-        and LocalPlayer.PlayerGui.MissionBoardGui.MainFrame.MissionList[SETTINGS.MissionName]:FindFirstChild("TextButton")
-
-    if btnPath then
-        print("Force-firing UI Button for " .. SETTINGS.MissionName)
-        -- Simulates a mouse click on the actual game button
-        for _, connection in pairs(getconnections(btnPath.MouseButton1Click)) do
-            connection:Fire()
-        end
-    else
-        warn("UI Mission Button not found!")
+-- Acceptance Logic (Direct from Manual Accept method)
+local function executeAcceptance()
+    local btn = getGameQuestButton()
+    if btn then
+        forceFire(btn)
+        task.wait(0.05)
+        forceFire(btn) -- Double fire for safety
     end
+    -- Direct remote call as a fallback
+    AcceptQuestRemote:FireServer(SETTINGS.MissionName)
 end
 
 -----------------------------------------------------------
@@ -70,114 +76,97 @@ screenGui.Name = "FarmManagerUI"
 screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 screenGui.ResetOnSpawn = false
 
--- Main Frame
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 220, 0, 220) -- Slightly taller for more options
-mainFrame.Position = UDim2.new(0.5, -110, 0.5, -110)
-mainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-mainFrame.BorderSizePixel = 2
+mainFrame.Size = UDim2.new(0, 220, 0, 180) -- Smaller frame since Auto is gone
+mainFrame.Position = UDim2.new(0.5, -110, 0.5, -90)
+mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+mainFrame.BorderSizePixel = 0
 mainFrame.Active = true
 mainFrame.Draggable = true
 mainFrame.Parent = screenGui
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
 
--- UI Title
 local title = Instance.new("TextLabel")
-title.Text = "Farm Manager Pro"
-title.Size = UDim2.new(1, 0, 0, 30)
-title.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+title.Text = "QUEST UTILITY V5"
+title.Size = UDim2.new(1, -30, 0, 35)
+title.BackgroundColor3 = Color3.fromRGB(35, 15, 15) 
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.Font = Enum.Font.SourceSansBold
+title.Font = Enum.Font.GothamBold
+title.TextSize = 13
 title.Parent = mainFrame
+Instance.new("UICorner", title).CornerRadius = UDim.new(0, 8)
 
--- "Quest" Button (Opens Game Mission Board)
-local openBoardBtn = Instance.new("TextButton")
-openBoardBtn.Text = "Open Board (UI)"
-openBoardBtn.Size = UDim2.new(0, 200, 0, 35)
-openBoardBtn.Position = UDim2.new(0, 10, 0, 40)
-openBoardBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
-openBoardBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-openBoardBtn.Parent = mainFrame
-
--- "Trigger Prompt" Button
-local promptBtn = Instance.new("TextButton")
-promptBtn.Text = "Trigger Board Prompt"
-promptBtn.Size = UDim2.new(0, 200, 0, 35)
-promptBtn.Position = UDim2.new(0, 10, 0, 80)
-promptBtn.BackgroundColor3 = Color3.fromRGB(100, 50, 150)
-promptBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-promptBtn.Parent = mainFrame
-
--- "Auto-Farm" Toggle Button
-local toggleFarmBtn = Instance.new("TextButton")
-toggleFarmBtn.Text = "Auto-Farm: OFF"
-toggleFarmBtn.Size = UDim2.new(0, 200, 0, 35)
-toggleFarmBtn.Position = UDim2.new(0, 10, 0, 125)
-toggleFarmBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-toggleFarmBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleFarmBtn.Parent = mainFrame
-
--- "Close" Button
 local closeBtn = Instance.new("TextButton")
-closeBtn.Text = "Close Menu"
-closeBtn.Size = UDim2.new(0, 200, 0, 35)
-closeBtn.Position = UDim2.new(0, 10, 0, 170)
-closeBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+closeBtn.Text = "X"
+closeBtn.Size = UDim2.new(0, 30, 0, 35)
+closeBtn.Position = UDim2.new(1, -30, 0, 0)
+closeBtn.BackgroundColor3 = Color3.fromRGB(50, 20, 20)
 closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.Font = Enum.Font.GothamBold
 closeBtn.Parent = mainFrame
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -20, 0, 20)
+statusLabel.Position = UDim2.new(0, 10, 0, 40)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Monitoring Extermination..."
+statusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextSize = 11
+statusLabel.Parent = mainFrame
+
+local openMenuBtn = Instance.new("TextButton")
+openMenuBtn.Text = "Open Mission Board"
+openMenuBtn.Size = UDim2.new(0, 200, 0, 40)
+openMenuBtn.Position = UDim2.new(0, 10, 0, 70)
+openMenuBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 70)
+openMenuBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+openMenuBtn.Font = Enum.Font.GothamBold
+openMenuBtn.Parent = mainFrame
+Instance.new("UICorner", openMenuBtn).CornerRadius = UDim.new(0, 5)
+
+local acceptBtn = Instance.new("TextButton")
+acceptBtn.Text = "Force Accept Quest"
+acceptBtn.Size = UDim2.new(0, 200, 0, 40)
+acceptBtn.Position = UDim2.new(0, 10, 0, 120)
+acceptBtn.BackgroundColor3 = Color3.fromRGB(40, 100, 40)
+acceptBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+acceptBtn.Font = Enum.Font.GothamBold
+acceptBtn.Parent = mainFrame
+Instance.new("UICorner", acceptBtn).CornerRadius = UDim.new(0, 5)
 
 -----------------------------------------------------------
 -- LOGIC
 -----------------------------------------------------------
 
--- 1. Open Game Mission Board
-openBoardBtn.MouseButton1Click:Connect(function()
-    local missionBoard = LocalPlayer.PlayerGui:FindFirstChild("MissionBoardGui")
-    if missionBoard and missionBoard:FindFirstChild("MainFrame") then
-        missionBoard.MainFrame.Visible = true
-    else
-        -- Fallback: If UI isn't loaded, try to force-click the button
-        forceFireUIButton()
+-- Keep status label updated with the current button state
+task.spawn(function()
+    while true do
+        local gameBtn = getGameQuestButton()
+        if gameBtn then
+            statusLabel.Text = "State: " .. gameBtn.Text
+            if gameBtn.Text == "Accept" then
+                statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+            else
+                statusLabel.TextColor3 = Color3.fromRGB(255, 180, 50)
+            end
+        else
+            statusLabel.Text = "Board Not Found"
+            statusLabel.TextColor3 = Color3.fromRGB(200, 50, 50)
+        end
+        task.wait(0.5)
     end
 end)
 
--- 2. Trigger World Prompt
-promptBtn.MouseButton1Click:Connect(function()
+openMenuBtn.MouseButton1Click:Connect(function()
     triggerMissionPrompt()
 end)
 
--- 3. Toggle Auto-Farm
-toggleFarmBtn.MouseButton1Click:Connect(function()
-    SETTINGS.AutoFarmEnabled = not SETTINGS.AutoFarmEnabled
-    
-    if SETTINGS.AutoFarmEnabled then
-        toggleFarmBtn.Text = "Auto-Farm: ON"
-        toggleFarmBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 0)
-        
-        task.spawn(function()
-            while SETTINGS.AutoFarmEnabled do
-                -- Sequence: Trigger Prompt -> Accept Remote -> Attack
-                triggerMissionPrompt()
-                task.wait(0.6) -- Wait for prompt hold time
-                acceptMissionRemote()
-                task.wait(1)
-                
-                -- Attack cycle
-                for i = 1, 15 do
-                    if not SETTINGS.AutoFarmEnabled then break end
-                    performAttack()
-                    task.wait(SETTINGS.AttackDelay)
-                end
-                task.wait(1)
-            end
-        end)
-    else
-        toggleFarmBtn.Text = "Auto-Farm: OFF"
-        toggleFarmBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    end
+acceptBtn.MouseButton1Click:Connect(function()
+    executeAcceptance()
 end)
 
--- 4. Close this Menu
 closeBtn.MouseButton1Click:Connect(function()
-    SETTINGS.AutoFarmEnabled = false 
     screenGui:Destroy()
 end)
