@@ -1,18 +1,93 @@
--- Combined Tester for Combat, Quest Remotes, and UI
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+--[[
+    Advanced Auto Farm V18.9 (Center-Lock Logic)
+    Updates:
+    - Center-Lock System: Replaces basic TP with a high-frequency CFrame lock.
+    - Anti-Offset: Forces the player to remain perfectly centered under the NPC to prevent AI "fleeing."
+    - Velocity Nullification: Aggressively sets velocity to 0 to prevent animation-based drifting.
+    - RenderStepped Alignment: Syncs movement with the camera/render for maximum precision.
+    - Equip-First Logic: Teleportation now waits until the weapon is successfully equipped.
+    - Settings Persistence: Now saves Auto Gems and Auto Chests states.
+]]
+
 local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local player = Players.LocalPlayer
 
--- Remote Paths
-local AcceptQuestRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("AcceptQuest")
+-- File name for settings
+local SETTINGS_FILE = "FarmSettings_V18.json"
 
--- Configuration
-local SETTINGS = {
-    MissionName = "Extermination"
-}
+-- State variables
+local selectedTargets = {} 
+local isAutoFarming = false
+local isGemFarming = false
+local isChestFarming = false
+local currentTab = "Bosses" 
+local currentToolType = "Physical" 
+local farmDistance = 7 
+local isActivelyFarming = false 
+local lastEquipTime = 0
+local lastKnownWeaponName = nil 
 
--- UI Helpers (Advanced Force-Fire Logic)
+-- Priority / Locking State
+local lockedTarget = nil
+local lastScanTime = 0
+local scanInterval = 0.8 
+local lastObservedHP = 0
+local isCurrentlyDamaging = false 
+
+-- Persistence Logic
+local function saveSettings()
+    local data = {
+        selectedTargets = selectedTargets,
+        currentToolType = currentToolType,
+        farmDistance = farmDistance,
+        isGemFarming = isGemFarming,
+        isChestFarming = isChestFarming
+    }
+    pcall(function()
+        if writefile then
+            writefile(SETTINGS_FILE, HttpService:JSONEncode(data))
+        end
+    end)
+end
+
+local function loadSettings()
+    pcall(function()
+        if readfile and isfile and isfile(SETTINGS_FILE) then
+            local data = HttpService:JSONDecode(readfile(SETTINGS_FILE))
+            if data.selectedTargets then selectedTargets = data.selectedTargets end
+            if data.currentToolType then currentToolType = data.currentToolType end
+            if data.farmDistance then farmDistance = data.farmDistance end
+            if data.isGemFarming ~= nil then isGemFarming = data.isGemFarming end
+            if data.isChestFarming ~= nil then isChestFarming = data.isChestFarming end
+        end
+    end)
+end
+
+loadSettings()
+
+-- Game UI Paths
+local ScreenGuiPath = player:WaitForChild("PlayerGui"):WaitForChild("ScreenGui")
+local EnemyIndex = ScreenGuiPath:WaitForChild("EnemyIndex")
+local ContentFrame = EnemyIndex:WaitForChild("ContentFrame")
+local EnemyDisplay = ContentFrame:WaitForChild("EnemyDisplay")
+local CatList = ContentFrame:WaitForChild("CategoryList")
+local DetailsPanel = EnemyIndex:FindFirstChild("DetailsPanel") or EnemyIndex:WaitForChild("DetailsPanel", 5)
+local SkillGui = player:WaitForChild("PlayerGui"):WaitForChild("SkillPointGui")
+local StatsRows = SkillGui:WaitForChild("MainFrame"):WaitForChild("StatRowsFrame")
+
+local ItemsFrame = ScreenGuiPath:WaitForChild("ItemsFrame")
+local PhysicalItemsTabBtn = ItemsFrame:WaitForChild("PhysicalItems")
+local MagicalItemsTabBtn = ItemsFrame:WaitForChild("MagicalItems")
+local PhysicalItemsPath = ItemsFrame:WaitForChild("PhysicalItemsFrame")
+local MagicalItemsPath = ItemsFrame:WaitForChild("MagicalItemsFrame")
+
+local ItemInfo = ItemsFrame:FindFirstChild("ItemDamage") or ItemsFrame:WaitForChild("ItemDamage", 5)
+local OpenChestRemote = ReplicatedStorage:WaitForChild("OpenChest")
+
+-- UI Helpers
 local function forceFire(button)
     if not button then return end 
     pcall(function()
@@ -21,152 +96,515 @@ local function forceFire(button)
             local signal = button:FindFirstChild(eventName) or button[eventName]
             if signal then
                 for _, connection in pairs(getconnections(signal)) do
-                    if connection.Function then 
-                        task.spawn(connection.Function)
-                    elseif connection.Fire then 
-                        connection:Fire() 
-                    end
+                    if connection.Function then task.spawn(connection.Function)
+                    elseif connection.Fire then connection:Fire() end
                 end
             end
         end
     end)
 end
 
--- Helper to find the actual Game Quest Button
-local function getGameQuestButton()
-    local gui = LocalPlayer.PlayerGui:FindFirstChild("MissionBoardGui")
-    local btn = gui and gui:FindFirstChild("MainFrame")
-        and gui.MainFrame:FindFirstChild("MissionList")
-        and gui.MainFrame.MissionList:FindFirstChild(SETTINGS.MissionName)
-        and gui.MainFrame.MissionList[SETTINGS.MissionName]:FindFirstChild("TextButton")
+-- Main UI Setup
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "FarmGui_V18_9"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = player:WaitForChild("PlayerGui")
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 340, 0, 560) 
+MainFrame.Position = UDim2.new(0.5, -170, 0.5, -280)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
+
+local Header = Instance.new("TextLabel")
+Header.Size = UDim2.new(1, 0, 0, 40)
+Header.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+Header.Text = "AUTO FARM V18.9"
+Header.TextColor3 = Color3.new(1, 1, 1)
+Header.Font = Enum.Font.GothamBold
+Header.TextSize = 14
+Header.Parent = MainFrame
+Instance.new("UICorner", Header).CornerRadius = UDim.new(0, 10)
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseBtn.Position = UDim2.new(1, -35, 0, 5)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.new(1, 1, 1)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.Parent = Header
+CloseBtn.MouseButton1Click:Connect(function()
+    isAutoFarming = false
+    isGemFarming = false
+    isChestFarming = false
+    ScreenGui:Destroy()
+end)
+
+local function parseValue(str)
+    if not str or str == "" then return 0 end
+    str = string.gsub(str, "[^%d%.%a%+%-]", "") 
+    local num = tonumber(string.match(str, "[%d%.eE%+%-]+")) or 0
+    local suffix = string.match(str, "[%a]+$")
+    if suffix then
+        suffix = suffix:upper()
+        if suffix == "K" then num = num * 1e3
+        elseif suffix == "M" then num = num * 1e6
+        elseif suffix == "B" then num = num * 1e9
+        elseif suffix == "T" then num = num * 1e12
+        elseif suffix == "QD" then num = num * 1e15
+        end
+    end
+    return num
+end
+
+local function getUserDamage()
+    local rowName = (currentToolType == "Physical") and "Physical DamageRow" or "Magical DamageRow"
+    local row = StatsRows:FindFirstChild(rowName)
+    if row and row:FindFirstChild("StatLabel") then
+        local baseDmgText = string.match(row.StatLabel.Text, ":%s*([%d%.%a]+)")
+        local baseDmg = parseValue(baseDmgText)
+        local weaponDmgText = ItemInfo and ItemInfo.Text or "1x"
+        local weaponMult = tonumber(string.match(weaponDmgText, "%d+%.?%d*")) or 1
+        return baseDmg * weaponMult
+    end
+    return 0
+end
+
+local function getTargetDefense(name)
+    if not name or not DetailsPanel then return 0 end
+    local icon = EnemyDisplay:FindFirstChild(name .. "Icon")
+    if icon then
+        local btn = icon:FindFirstChildOfClass("ImageButton")
+        if btn then forceFire(btn) end
+    end
+    task.wait(0.01)
+    local statsFrame = DetailsPanel:FindFirstChild("StatsFrame")
+    local defLabel = statsFrame and statsFrame:FindFirstChild("DefenseLabel")
+    return defLabel and parseValue(defLabel.Text) or 0
+end
+
+-- NPC LIST SECTION
+local SearchBar = Instance.new("TextBox")
+SearchBar.Size = UDim2.new(1, -20, 0, 30)
+SearchBar.Position = UDim2.new(0, 10, 0, 50)
+SearchBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+SearchBar.PlaceholderText = "Search Index / Modifier..."
+SearchBar.Text = "" 
+SearchBar.TextColor3 = Color3.new(1, 1, 1)
+SearchBar.Font = Enum.Font.Gotham
+SearchBar.Parent = MainFrame
+Instance.new("UICorner", SearchBar).CornerRadius = UDim.new(0, 5)
+
+local TabBar = Instance.new("Frame")
+TabBar.Size = UDim2.new(1, -20, 0, 25)
+TabBar.Position = UDim2.new(0, 10, 0, 85)
+TabBar.BackgroundTransparency = 1
+TabBar.Parent = MainFrame
+
+local function createBtn(text, post, size, parent)
+    local btn = Instance.new("TextButton")
+    btn.Size = size
+    btn.Position = post
+    btn.Text = text
+    btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    btn.TextColor3 = Color3.new(1, 1, 1)
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 10
+    btn.Parent = parent
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
     return btn
 end
 
--- Interaction
-local function triggerMissionPrompt()
-    local prompt = Workspace:FindFirstChild("MissionBoard") 
-        and Workspace.MissionBoard:FindFirstChild("Fabric") 
-        and Workspace.MissionBoard.Fabric:FindFirstChild("MissionBoardPrompt")
+local BossTabBtn = createBtn("Bosses", UDim2.new(0, 0, 0, 0), UDim2.new(0.33, -5, 1, 0), TabBar)
+local EnemyTabBtn = createBtn("Enemies", UDim2.new(0.33, 2, 0, 0), UDim2.new(0.33, -5, 1, 0), TabBar)
+local ModTabBtn = createBtn("Modifier", UDim2.new(0.66, 4, 0, 0), UDim2.new(0.34, -5, 1, 0), TabBar)
+
+local ListFrame = Instance.new("ScrollingFrame")
+ListFrame.Size = UDim2.new(1, -20, 0, 130)
+ListFrame.Position = UDim2.new(0, 10, 0, 115)
+ListFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+ListFrame.ScrollBarThickness = 4
+ListFrame.Parent = MainFrame
+Instance.new("UIListLayout", ListFrame).Padding = UDim.new(0, 5)
+
+local function refreshNPCList()
+    for _, child in pairs(ListFrame:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
+    local filter = (SearchBar.Text):lower()
+    local count = 0
     
-    if prompt then
-        fireproximityprompt(prompt, 30) 
-        return true
+    BossTabBtn.BackgroundColor3 = (currentTab == "Bosses") and Color3.fromRGB(60, 60, 90) or Color3.fromRGB(45, 45, 45)
+    EnemyTabBtn.BackgroundColor3 = (currentTab == "Enemies") and Color3.fromRGB(60, 60, 90) or Color3.fromRGB(45, 45, 45)
+    ModTabBtn.BackgroundColor3 = (currentTab == "Modifier") and Color3.fromRGB(60, 60, 90) or Color3.fromRGB(45, 45, 45)
+
+    for _, icon in pairs(EnemyDisplay:GetChildren()) do
+        if icon:IsA("Frame") and string.find(icon.Name, "Icon") and icon.Name ~= "EnemyIconTemplate" then
+            local npcName = string.gsub(icon.Name, "Icon", "")
+            if filter == "" or string.find(npcName:lower(), filter) then
+                count = count + 1
+                local btn = createBtn(npcName, UDim2.new(0,0,0,0), UDim2.new(1,-10,0,28), ListFrame)
+                
+                if selectedTargets[npcName] then 
+                    btn.BackgroundColor3 = Color3.fromRGB(40, 120, 40) 
+                    btn.Text = "✔ " .. npcName
+                end
+
+                btn.MouseButton1Click:Connect(function()
+                    selectedTargets[npcName] = not selectedTargets[npcName] or nil
+                    saveSettings()
+                    refreshNPCList()
+                    lockedTarget = nil
+                    isCurrentlyDamaging = false
+                end)
+            end
+        end
     end
-    return false
+    ListFrame.CanvasSize = UDim2.new(0, 0, 0, count * 33)
 end
 
--- Acceptance Logic (Direct from Manual Accept method)
-local function executeAcceptance()
-    local btn = getGameQuestButton()
-    if btn then
-        forceFire(btn)
-        task.wait(0.05)
-        forceFire(btn) -- Double fire for safety
-    end
-    -- Direct remote call as a fallback
-    AcceptQuestRemote:FireServer(SETTINGS.MissionName)
+SearchBar:GetPropertyChangedSignal("Text"):Connect(refreshNPCList)
+BossTabBtn.MouseButton1Click:Connect(function() currentTab = "Bosses"; forceFire(CatList:FindFirstChild("BossesButton")); task.wait(0.1); refreshNPCList() end)
+EnemyTabBtn.MouseButton1Click:Connect(function() currentTab = "Enemies"; forceFire(CatList:FindFirstChild("EnemiesButton")); task.wait(0.1); refreshNPCList() end)
+ModTabBtn.MouseButton1Click:Connect(function() currentTab = "Modifier"; forceFire(CatList:FindFirstChild("ModifiersButton")); task.wait(0.1); refreshNPCList() end)
+
+-- Tool Type Selection
+local ToolCatFrame = Instance.new("Frame")
+ToolCatFrame.Size = UDim2.new(1, -20, 0, 35)
+ToolCatFrame.Position = UDim2.new(0, 10, 0, 255)
+ToolCatFrame.BackgroundTransparency = 1
+ToolCatFrame.Parent = MainFrame
+
+local PhysBtn = createBtn("PHYSICAL", UDim2.new(0, 0, 0, 0), UDim2.new(0.5, -5, 1, 0), ToolCatFrame)
+local MagBtn = createBtn("MAGICAL", UDim2.new(0.5, 5, 0, 0), UDim2.new(0.5, -5, 1, 0), ToolCatFrame)
+
+local function updateToolButtons()
+    PhysBtn.BackgroundColor3 = (currentToolType == "Physical") and Color3.fromRGB(60, 60, 90) or Color3.fromRGB(45, 45, 45)
+    MagBtn.BackgroundColor3 = (currentToolType == "Magical") and Color3.fromRGB(60, 60, 90) or Color3.fromRGB(45, 45, 45)
+    saveSettings()
 end
 
------------------------------------------------------------
--- UI CONSTRUCTION
------------------------------------------------------------
+PhysBtn.MouseButton1Click:Connect(function() currentToolType = "Physical"; updateToolButtons() end)
+MagBtn.MouseButton1Click:Connect(function() currentToolType = "Magical"; updateToolButtons() end)
+updateToolButtons()
 
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "FarmManagerUI"
-screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-screenGui.ResetOnSpawn = false
+-- Settings (Distance)
+local SettingFrame = Instance.new("Frame")
+SettingFrame.Size = UDim2.new(1, -20, 0, 70)
+SettingFrame.Position = UDim2.new(0, 10, 0, 300)
+SettingFrame.BackgroundTransparency = 1
+SettingFrame.Parent = MainFrame
 
-local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 220, 0, 180) -- Smaller frame since Auto is gone
-mainFrame.Position = UDim2.new(0.5, -110, 0.5, -90)
-mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-mainFrame.BorderSizePixel = 0
-mainFrame.Active = true
-mainFrame.Draggable = true
-mainFrame.Parent = screenGui
-Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
+local DistLabel = Instance.new("TextLabel")
+DistLabel.Size = UDim2.new(0.7, 0, 0, 30)
+DistLabel.Text = "Farm Distance:"
+DistLabel.TextColor3 = Color3.new(1, 1, 1)
+DistLabel.BackgroundTransparency = 1
+DistLabel.TextXAlignment = Enum.TextXAlignment.Left
+DistLabel.Parent = SettingFrame
 
-local title = Instance.new("TextLabel")
-title.Text = "QUEST UTILITY V5"
-title.Size = UDim2.new(1, -30, 0, 35)
-title.BackgroundColor3 = Color3.fromRGB(35, 15, 15) 
-title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.Font = Enum.Font.GothamBold
-title.TextSize = 13
-title.Parent = mainFrame
-Instance.new("UICorner", title).CornerRadius = UDim.new(0, 8)
+local DistInput = Instance.new("TextBox")
+DistInput.Size = UDim2.new(0.3, 0, 0, 30)
+DistInput.Position = UDim2.new(0.7, 0, 0, 0)
+DistInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+DistInput.Text = tostring(farmDistance)
+DistInput.TextColor3 = Color3.new(1, 1, 1)
+DistInput.Parent = SettingFrame
+Instance.new("UICorner", DistInput).CornerRadius = UDim.new(0, 5)
 
-local closeBtn = Instance.new("TextButton")
-closeBtn.Text = "X"
-closeBtn.Size = UDim2.new(0, 30, 0, 35)
-closeBtn.Position = UDim2.new(1, -30, 0, 0)
-closeBtn.BackgroundColor3 = Color3.fromRGB(50, 20, 20)
-closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-closeBtn.Font = Enum.Font.GothamBold
-closeBtn.Parent = mainFrame
-Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
+DistInput:GetPropertyChangedSignal("Text"):Connect(function()
+    local val = tonumber(DistInput.Text)
+    if val then farmDistance = val; saveSettings() end
+end)
 
-local statusLabel = Instance.new("TextLabel")
-statusLabel.Size = UDim2.new(1, -20, 0, 20)
-statusLabel.Position = UDim2.new(0, 10, 0, 40)
-statusLabel.BackgroundTransparency = 1
-statusLabel.Text = "Monitoring Extermination..."
-statusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
-statusLabel.Font = Enum.Font.Gotham
-statusLabel.TextSize = 11
-statusLabel.Parent = mainFrame
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(1, 0, 0, 30)
+StatusLabel.Position = UDim2.new(0, 0, 0, 40)
+StatusLabel.Text = "Status: Idle"
+StatusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Parent = SettingFrame
 
-local openMenuBtn = Instance.new("TextButton")
-openMenuBtn.Text = "Open Mission Board"
-openMenuBtn.Size = UDim2.new(0, 200, 0, 40)
-openMenuBtn.Position = UDim2.new(0, 10, 0, 70)
-openMenuBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 70)
-openMenuBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-openMenuBtn.Font = Enum.Font.GothamBold
-openMenuBtn.Parent = mainFrame
-Instance.new("UICorner", openMenuBtn).CornerRadius = UDim.new(0, 5)
+-- Action Buttons Section
+local ActionFrame = Instance.new("Frame")
+ActionFrame.Size = UDim2.new(1, -20, 0, 160)
+ActionFrame.Position = UDim2.new(0, 10, 0, 380)
+ActionFrame.BackgroundTransparency = 1
+ActionFrame.Parent = MainFrame
 
-local acceptBtn = Instance.new("TextButton")
-acceptBtn.Text = "Force Accept Quest"
-acceptBtn.Size = UDim2.new(0, 200, 0, 40)
-acceptBtn.Position = UDim2.new(0, 10, 0, 120)
-acceptBtn.BackgroundColor3 = Color3.fromRGB(40, 100, 40)
-acceptBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-acceptBtn.Font = Enum.Font.GothamBold
-acceptBtn.Parent = mainFrame
-Instance.new("UICorner", acceptBtn).CornerRadius = UDim.new(0, 5)
+local Row1 = Instance.new("Frame")
+Row1.Size = UDim2.new(1, 0, 0, 45)
+Row1.BackgroundTransparency = 1
+Row1.Parent = ActionFrame
 
------------------------------------------------------------
--- LOGIC
------------------------------------------------------------
+local GemToggle = createBtn("AUTO GEMS", UDim2.new(0, 0, 0, 0), UDim2.new(0.5, -5, 1, 0), Row1)
+GemToggle.BackgroundColor3 = Color3.fromRGB(40, 70, 100)
+GemToggle.Font = Enum.Font.GothamBold
 
--- Keep status label updated with the current button state
+local ChestToggle = createBtn("AUTO CHESTS", UDim2.new(0.5, 5, 0, 0), UDim2.new(0.5, -5, 1, 0), Row1)
+ChestToggle.BackgroundColor3 = Color3.fromRGB(100, 70, 40)
+ChestToggle.Font = Enum.Font.GothamBold
+
+local FarmToggle = createBtn("START MAIN AUTO FARM", UDim2.new(0, 0, 0, 55), UDim2.new(1, 0, 0, 60), ActionFrame)
+FarmToggle.BackgroundColor3 = Color3.fromRGB(40, 100, 40)
+FarmToggle.Font = Enum.Font.GothamBold
+FarmToggle.TextSize = 14
+
+-- Update visual state of Gem/Chest toggles based on loaded settings
+local function updateTogglesUI()
+    GemToggle.Text = isGemFarming and "GEMS: ON" or "AUTO GEMS"
+    GemToggle.BackgroundColor3 = isGemFarming and Color3.fromRGB(30, 120, 180) or Color3.fromRGB(40, 70, 100)
+    
+    ChestToggle.Text = isChestFarming and "CHESTS: ON" or "AUTO CHESTS"
+    ChestToggle.BackgroundColor3 = isChestFarming and Color3.fromRGB(180, 120, 30) or Color3.fromRGB(100, 70, 40)
+end
+updateTogglesUI()
+
+-- Recover Logic
+local function attemptWeaponRecovery()
+    if not lastKnownWeaponName then return end
+    StatusLabel.Text = "Bug Detected! Recovering: " .. lastKnownWeaponName
+    if currentToolType == "Physical" then forceFire(PhysicalItemsTabBtn) else forceFire(MagicalItemsTabBtn) end
+    task.wait(0.2)
+    local targetFrame = (currentToolType == "Physical") and PhysicalItemsPath or MagicalItemsPath
+    local buttonName = lastKnownWeaponName .. "_Button"
+    for _, child in pairs(targetFrame:GetChildren()) do
+        if child:IsA("Frame") and child.Name == "Template" then
+            local btn = child:FindFirstChild(buttonName) or child:FindFirstChildOfClass("ImageButton")
+            if btn and string.lower(btn.Name) == string.lower(buttonName) then forceFire(btn) return true end
+        end
+    end
+end
+
+-- Farm Logic
+local function getBestWeapon()
+    local char = player.Character
+    if not char then return nil end
+    local referencePath = (currentToolType == "Physical") and PhysicalItemsPath or MagicalItemsPath
+    local validNames = {}
+    for _, t in pairs(referencePath:GetChildren()) do
+        if t:IsA("Frame") and t.Name == "Template" then
+            local rb = t:FindFirstChildOfClass("ImageButton")
+            if rb then validNames[string.gsub(rb.Name, "_Button", ""):lower()] = true end
+        end
+    end
+    local foundTool = nil
+    for _, tool in pairs(char:GetChildren()) do 
+        if tool:IsA("Tool") and validNames[tool.Name:lower()] then foundTool = tool break end 
+    end
+    if not foundTool then
+        for _, tool in pairs(player.Backpack:GetChildren()) do 
+            if tool:IsA("Tool") and validNames[tool.Name:lower()] then foundTool = tool break end 
+        end
+    end
+    if foundTool then lastKnownWeaponName = foundTool.Name return foundTool end
+    if lastKnownWeaponName and tick() - lastEquipTime > 2 then
+        lastEquipTime = tick()
+        attemptWeaponRecovery()
+    end
+    return player.Backpack:FindFirstChildOfClass("Tool") or char:FindFirstChildOfClass("Tool")
+end
+
+local function findBestNewTarget()
+    local userDmg = getUserDamage()
+    local possibleEntries = {}
+    for _, obj in pairs(workspace:GetChildren()) do
+        if obj:IsA("Folder") and (string.find(obj.Name, "Enemies") or obj.Name == "Bosses" or string.find(obj.Name, "Knights") or obj.Name == "Slimes") then
+            for _, item in pairs(obj:GetChildren()) do
+                if item:IsA("Model") then
+                    local matchFound = false
+                    for selectedName, _ in pairs(selectedTargets) do
+                        if string.find(item.Name:lower(), selectedName:lower()) then matchFound = true; break end
+                    end
+                    if matchFound then
+                        local hum = item:FindFirstChildOfClass("Humanoid")
+                        local hrp = item:FindFirstChild("HumanoidRootPart") or item:FindFirstChild("Torso") or item:FindFirstChild("Head")
+                        if hum and hrp and hum.Health > 0 then
+                            local realHP = item:GetAttribute("BaseHealth") or hum.Health
+                            table.insert(possibleEntries, {model = item, hp = realHP})
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if #possibleEntries > 0 then
+        table.sort(possibleEntries, function(a, b) return a.hp < b.hp end)
+        for _, entry in ipairs(possibleEntries) do
+            local def = getTargetDefense(entry.model.Name)
+            if userDmg > def then return entry.model end
+        end
+    end
+    return nil
+end
+
+-- NPC Farm Loop (Scanning & State Management)
+RunService.Heartbeat:Connect(function()
+    if not isAutoFarming then isActivelyFarming = false lockedTarget = nil return end
+    
+    local char = player.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not char or not hum or hum.Health <= 0 then return end
+
+    if lockedTarget and lockedTarget.Parent then
+        local lHum = lockedTarget:FindFirstChildOfClass("Humanoid")
+        if not lHum or lHum.Health <= 0 then
+            lockedTarget = nil
+            isCurrentlyDamaging = false
+        else
+            local currentHP = lockedTarget:GetAttribute("BaseHealth") or lHum.Health
+            if currentHP < lastObservedHP then isCurrentlyDamaging = true end
+            lastObservedHP = currentHP
+        end
+    else
+        lockedTarget = nil
+        isCurrentlyDamaging = false
+    end
+
+    if not isCurrentlyDamaging and (not lockedTarget or tick() - lastScanTime >= scanInterval) then
+        lastScanTime = tick()
+        local best = findBestNewTarget()
+        if best then 
+            lockedTarget = best 
+            local lHum = lockedTarget:FindFirstChildOfClass("Humanoid")
+            lastObservedHP = lockedTarget:GetAttribute("BaseHealth") or (lHum and lHum.Health) or 0
+        end
+    end
+
+    if lockedTarget then
+        local tool = getBestWeapon()
+        if tool and tool.Parent ~= char then
+            -- Equip weapon before we start actively farming or locking position
+            if tick() - lastEquipTime > 0.8 then
+                lastEquipTime = tick()
+                hum:EquipTool(tool)
+            end
+        elseif tool and tool.Parent == char then
+            -- Once tool is in hand, we start the combat sequence
+            isActivelyFarming = true
+            -- A tiny task.wait here helps the game process the equip before activating
+            task.spawn(function()
+                task.wait(0.1) 
+                if tool and tool.Parent == char then
+                    tool:Activate()
+                end
+            end)
+        end
+    else
+        isActivelyFarming = false
+    end
+end)
+
+-- POSITION LOCKING SYSTEM (Combat Realignment)
+RunService.RenderStepped:Connect(function()
+    if not isAutoFarming or not lockedTarget then return end
+    
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    
+    -- Check if tool is equipped. 
+    -- Fine Tuning: We only TP if the tool is actually in the Character's hand.
+    local toolInHand = char and char:FindFirstChildOfClass("Tool")
+    
+    if hrp and toolInHand then
+        local tHRP = lockedTarget:FindFirstChild("HumanoidRootPart") or lockedTarget:FindFirstChild("Torso") or lockedTarget:FindFirstChild("Head")
+        if tHRP then
+            -- Lock CFrame to center under NPC
+            hrp.CFrame = CFrame.new(tHRP.Position - Vector3.new(0, farmDistance, 0), tHRP.Position)
+            hrp.Velocity = Vector3.new(0,0,0)
+            hrp.RotVelocity = Vector3.new(0,0,0)
+        end
+    end
+end)
+
+-- Status Updates
 task.spawn(function()
-    while true do
-        local gameBtn = getGameQuestButton()
-        if gameBtn then
-            statusLabel.Text = "State: " .. gameBtn.Text
-            if gameBtn.Text == "Accept" then
-                statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+    while task.wait(0.1) do
+        if isAutoFarming then
+            if lockedTarget then
+                local tHum = lockedTarget:FindFirstChildOfClass("Humanoid")
+                local displayHP = lockedTarget:GetAttribute("BaseHealth") or (tHum and tHum.Health) or 0
+                StatusLabel.Text = (isCurrentlyDamaging and "DAMAGING: " or "Targeting: ") .. lockedTarget.Name .. " (" .. displayHP .. " HP)"
             else
-                statusLabel.TextColor3 = Color3.fromRGB(255, 180, 50)
+                StatusLabel.Text = "Searching Selected Pool..."
             end
         else
-            statusLabel.Text = "Board Not Found"
-            statusLabel.TextColor3 = Color3.fromRGB(200, 50, 50)
+            StatusLabel.Text = "Status: Idle"
         end
-        task.wait(0.5)
     end
 end)
 
-openMenuBtn.MouseButton1Click:Connect(function()
-    triggerMissionPrompt()
+-- Gem Farm Logic
+RunService.Heartbeat:Connect(function()
+    if not isGemFarming then return end
+    local gemFolder = workspace:FindFirstChild("SpawnedGems")
+    if not gemFolder then return end
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    for _, gem in pairs(gemFolder:GetChildren()) do
+        local touchInterest = gem:FindFirstChildWhichIsA("TouchTransmitter", true)
+        if touchInterest then
+            firetouchinterest(hrp, touchInterest.Parent, 0)
+            firetouchinterest(hrp, touchInterest.Parent, 1)
+        end
+    end
 end)
 
-acceptBtn.MouseButton1Click:Connect(function()
-    executeAcceptance()
+-- Chest Farm Logic
+task.spawn(function()
+    while task.wait(0.3) do
+        if isChestFarming then
+            pcall(function() OpenChestRemote:FireServer("BasicChest", 1) end)
+            task.wait(0.05)
+            pcall(function() OpenChestRemote:FireServer("RareChest", 1) end)
+            task.wait(0.05)
+            pcall(function() OpenChestRemote:FireServer("LegendaryChest", 1) end)
+        end
+    end
 end)
 
-closeBtn.MouseButton1Click:Connect(function()
-    screenGui:Destroy()
+-- Noclip
+RunService.Stepped:Connect(function()
+    if isAutoFarming and isActivelyFarming and player.Character then
+        for _, part in pairs(player.Character:GetDescendants()) do
+            if part:IsA("BasePart") then part.CanCollide = false end
+        end
+    end
+end)
+
+FarmToggle.MouseButton1Click:Connect(function()
+    isAutoFarming = not isAutoFarming
+    FarmToggle.Text = isAutoFarming and "STOP MAIN AUTO FARM" or "START MAIN AUTO FARM"
+    FarmToggle.BackgroundColor3 = isAutoFarming and Color3.fromRGB(100, 40, 40) or Color3.fromRGB(40, 100, 40)
+    
+    if not isAutoFarming then 
+        lockedTarget = nil 
+        isCurrentlyDamaging = false 
+    end
+end)
+
+GemToggle.MouseButton1Click:Connect(function()
+    isGemFarming = not isGemFarming
+    saveSettings() -- Save state
+    updateTogglesUI()
+end)
+
+ChestToggle.MouseButton1Click:Connect(function()
+    isChestFarming = not isChestFarming
+    saveSettings() -- Save state
+    updateTogglesUI()
+end)
+
+task.spawn(function()
+    if CatList then
+        forceFire(CatList:FindFirstChild("EnemiesButton"))
+        task.wait(0.1)
+        forceFire(CatList:FindFirstChild("BossesButton"))
+        task.wait(0.1)
+        forceFire(CatList:FindFirstChild("ModifiersButton"))
+    end
+    refreshNPCList()
 end)
