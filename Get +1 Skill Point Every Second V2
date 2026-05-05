@@ -7,6 +7,7 @@
     - RenderStepped Alignment: Syncs movement with the camera/render for maximum precision.
     - Equip-First Logic: Teleportation now waits until the weapon is successfully equipped.
     - Settings Persistence: Now saves Auto Gems and Auto Chests states.
+    - Collision Fix: Explicitly restores character collisions when farming is disabled or idle.
 ]]
 
 local Players = game:GetService("Players")
@@ -104,6 +105,18 @@ local function forceFire(button)
     end)
 end
 
+-- Collision Reset Helper
+local function resetCollisions()
+    local char = player.Character
+    if char then
+        for _, part in pairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = true
+            end
+        end
+    end
+end
+
 -- Main UI Setup
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "FarmGui_V18_9"
@@ -142,6 +155,7 @@ CloseBtn.MouseButton1Click:Connect(function()
     isAutoFarming = false
     isGemFarming = false
     isChestFarming = false
+    resetCollisions()
     ScreenGui:Destroy()
 end)
 
@@ -443,7 +457,11 @@ end
 
 -- NPC Farm Loop (Scanning & State Management)
 RunService.Heartbeat:Connect(function()
-    if not isAutoFarming then isActivelyFarming = false lockedTarget = nil return end
+    if not isAutoFarming then 
+        isActivelyFarming = false 
+        lockedTarget = nil 
+        return 
+    end
     
     local char = player.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -454,6 +472,7 @@ RunService.Heartbeat:Connect(function()
         if not lHum or lHum.Health <= 0 then
             lockedTarget = nil
             isCurrentlyDamaging = false
+            resetCollisions() -- Reset when target dies
         else
             local currentHP = lockedTarget:GetAttribute("BaseHealth") or lHum.Health
             if currentHP < lastObservedHP then isCurrentlyDamaging = true end
@@ -471,6 +490,8 @@ RunService.Heartbeat:Connect(function()
             lockedTarget = best 
             local lHum = lockedTarget:FindFirstChildOfClass("Humanoid")
             lastObservedHP = lockedTarget:GetAttribute("BaseHealth") or (lHum and lHum.Health) or 0
+        else
+            resetCollisions() -- No target found, stay solid
         end
     end
 
@@ -504,9 +525,6 @@ RunService.RenderStepped:Connect(function()
     
     local char = player.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    
-    -- Check if tool is equipped. 
-    -- Fine Tuning: We only TP if the tool is actually in the Character's hand.
     local toolInHand = char and char:FindFirstChildOfClass("Tool")
     
     if hrp and toolInHand then
@@ -566,9 +584,10 @@ task.spawn(function()
     end
 end)
 
--- Noclip
+-- Noclip Logic
 RunService.Stepped:Connect(function()
     if isAutoFarming and isActivelyFarming and player.Character then
+        -- Only disable collisions if we are actively attacking a target
         for _, part in pairs(player.Character:GetDescendants()) do
             if part:IsA("BasePart") then part.CanCollide = false end
         end
@@ -583,6 +602,7 @@ FarmToggle.MouseButton1Click:Connect(function()
     if not isAutoFarming then 
         lockedTarget = nil 
         isCurrentlyDamaging = false 
+        resetCollisions() -- Immediate reset on toggle
     end
 end)
 
