@@ -1,77 +1,288 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
 local Remotes = ReplicatedStorage:WaitForChild("RemoteEvents")
+
+-- Global control for all loops
+local scriptRunning = true
 
 -- GUI Setup
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "SimpleTrainer"
+ScreenGui.Name = "EliteTrainerPro_Dynamic"
 ScreenGui.Parent = game:GetService("CoreGui")
 ScreenGui.ResetOnSpawn = false
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 220, 0, 150)
-MainFrame.Position = UDim2.new(0.5, -110, 0.5, -75)
-MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MainFrame.Size = UDim2.new(0, 250, 0, 380)
+MainFrame.Position = UDim2.new(0.5, -125, 0.5, -190)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
-MainFrame.Draggable = true
 MainFrame.Parent = ScreenGui
 
-local UIList = Instance.new("UIListLayout")
-UIList.Parent = MainFrame
-UIList.HorizontalAlignment = Enum.HorizontalAlignment.Center
-UIList.Padding = UDim.new(0, 8)
+-- --- DRAG LOGIC ---
+local dragging, dragInput, dragStart, startPos
+local function update(input)
+    local delta = input.Position - dragStart
+    MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
 
--- Padding for the top
-local TopPadding = Instance.new("Frame")
-TopPadding.Size = UDim2.new(1, 0, 0, 5)
-TopPadding.BackgroundTransparency = 1
-TopPadding.Parent = MainFrame
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
 
-local function MakeBtn(txt, callback)
+MainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        update(input)
+    end
+end)
+
+-- --- TABS SETUP ---
+local TabContainer = Instance.new("Frame")
+TabContainer.Size = UDim2.new(1, 0, 0, 40)
+TabContainer.BackgroundTransparency = 1
+TabContainer.Parent = MainFrame
+
+local AutoTabBtn = Instance.new("TextButton")
+AutoTabBtn.Size = UDim2.new(0.5, 0, 1, 0)
+AutoTabBtn.Text = "AUTO FARM"
+AutoTabBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+AutoTabBtn.TextColor3 = Color3.new(1, 1, 1)
+AutoTabBtn.Parent = TabContainer
+
+local ZoneTabBtn = Instance.new("TextButton")
+ZoneTabBtn.Size = UDim2.new(0.5, 0, 1, 0)
+ZoneTabBtn.Position = UDim2.new(0.5, 0, 0, 0)
+ZoneTabBtn.Text = "ZONES"
+ZoneTabBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+ZoneTabBtn.TextColor3 = Color3.new(0.7, 0.7, 0.7)
+ZoneTabBtn.Parent = TabContainer
+
+local AutoPage = Instance.new("ScrollingFrame")
+AutoPage.Size = UDim2.new(1, 0, 1, -80)
+AutoPage.Position = UDim2.new(0, 0, 0, 40)
+AutoPage.BackgroundTransparency = 1
+AutoPage.CanvasSize = UDim2.new(0, 0, 1.2, 0)
+AutoPage.ScrollBarThickness = 4
+AutoPage.Parent = MainFrame
+
+local ZonePage = Instance.new("ScrollingFrame")
+ZonePage.Size = UDim2.new(1, 0, 1, -80)
+ZonePage.Position = UDim2.new(0, 0, 0, 40)
+ZonePage.BackgroundTransparency = 1
+ZonePage.Visible = false
+ZonePage.CanvasSize = UDim2.new(0, 0, 1.5, 0)
+ZonePage.ScrollBarThickness = 4
+ZonePage.Parent = MainFrame
+
+local function AddLayout(p)
+    local l = Instance.new("UIListLayout")
+    l.Parent = p
+    l.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    l.Padding = UDim.new(0, 10)
+    Instance.new("UIPadding", p).PaddingTop = UDim.new(0, 10)
+end
+AddLayout(AutoPage)
+AddLayout(ZonePage)
+
+AutoTabBtn.MouseButton1Click:Connect(function()
+    AutoPage.Visible, ZonePage.Visible = true, false
+    AutoTabBtn.BackgroundColor3, ZoneTabBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40), Color3.fromRGB(30, 30, 30)
+end)
+
+ZoneTabBtn.MouseButton1Click:Connect(function()
+    AutoPage.Visible, ZonePage.Visible = false, true
+    ZoneTabBtn.BackgroundColor3, AutoTabBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40), Color3.fromRGB(30, 30, 30)
+end)
+
+-- --- DYNAMIC ZONE SCANNING ---
+local function GetZoneOptions(category)
+    local options = {"None"}
+    local path = Workspace:FindFirstChild("Main")
+    if path then path = path:FindFirstChild("TrainingAreasHitBoxes") end
+    if path then path = path:FindFirstChild(category) end
+    
+    if path then
+        for _, obj in pairs(path:GetChildren()) do
+            if obj:IsA("BasePart") then
+                table.insert(options, obj.Name)
+            end
+        end
+    end
+    return options
+end
+
+-- --- AUTO FARM LOGIC ---
+local function MakeFarmBtn(txt, remoteName)
     local b = Instance.new("TextButton")
-    b.Size = UDim2.new(0, 200, 0, 40)
+    b.Size = UDim2.new(0, 220, 0, 45)
     b.Text = txt .. " [OFF]"
     b.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
     b.TextColor3 = Color3.new(1, 1, 1)
-    b.Font = Enum.Font.SourceSansBold
-    b.TextSize = 16
-    b.Parent = MainFrame
+    b.Parent = AutoPage
     
     local active = false
     b.MouseButton1Click:Connect(function()
         active = not active
         b.Text = txt .. (active and " [ON]" or " [OFF]")
-        b.BackgroundColor3 = active and Color3.fromRGB(0, 160, 100) or Color3.fromRGB(45, 45, 45)
-        callback(active)
+        b.BackgroundColor3 = active and Color3.fromRGB(0, 150, 100) or Color3.fromRGB(45, 45, 45)
+        
+        task.spawn(function()
+            -- Loop checks both the button state and the global script state
+            while active and scriptRunning do
+                local remote = Remotes:FindFirstChild(remoteName)
+                if remote then remote:FireServer() end
+                task.wait(0.1)
+            end
+        end)
     end)
 end
 
--- 1. Fist Strength
-MakeBtn("Fist Strength", function(state)
-    _G.FS = state
-    while _G.FS do
-        local remote = Remotes:FindFirstChild("FS_Train")
-        if remote then remote:FireServer() end
-        task.wait(0.1)
-    end
-end)
+MakeFarmBtn("Fist Strength", "FS_Train")
+MakeFarmBtn("Body Toughness", "BT_Train")
 
--- 2. Body Toughness
-MakeBtn("Body Toughness", function(state)
-    _G.BT = state
-    while _G.BT do
-        local remote = Remotes:FindFirstChild("BT_Train")
-        if remote then remote:FireServer() end
-        task.wait(0.1)
+-- --- ZONE SELECTION LOGIC ---
+local activeZones = {BT = nil, FS = nil, PS = nil}
+local originalPositions = {} -- Stores {part: Part, cf: CFrame, parent: Instance}
+
+local function ReturnZone(category)
+    local part = activeZones[category]
+    if part and originalPositions[part] then
+        part.CFrame = originalPositions[part].cf
+        part.Parent = originalPositions[part].parent
+        originalPositions[part] = nil
+        activeZones[category] = nil
     end
-end)
+end
+
+local function SetZone(category, zoneName)
+    -- Return current active zone to its spot first
+    ReturnZone(category)
+    
+    if zoneName == "None" then return end
+    
+    local path = Workspace:FindFirstChild("Main")
+    if path then path = path:FindFirstChild("TrainingAreasHitBoxes") end
+    if path then path = path:FindFirstChild(category) end
+    
+    local part = path and path:FindFirstChild(zoneName)
+    if part and part:IsA("BasePart") then
+        -- Save original state
+        originalPositions[part] = {
+            cf = part.CFrame,
+            parent = part.Parent
+        }
+        
+        activeZones[category] = part
+        
+        task.spawn(function()
+            -- Loop checks both the zone active status and the global script state
+            while activeZones[category] == part and scriptRunning do
+                local char = LocalPlayer.Character
+                local root = char and char:FindFirstChild("HumanoidRootPart")
+                if root then
+                    part.CFrame = root.CFrame
+                end
+                task.wait()
+            end
+        end)
+    end
+end
+
+local function CreateDropdown(labelTxt, category)
+    local options = GetZoneOptions(category)
+    local container = Instance.new("Frame")
+    container.Size = UDim2.new(0, 220, 0, 60)
+    container.BackgroundTransparency = 1
+    container.Parent = ZonePage
+    
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 0, 20)
+    lbl.Text = labelTxt
+    lbl.TextColor3 = Color3.new(0.8, 0.8, 0.8)
+    lbl.BackgroundTransparency = 1
+    lbl.Parent = container
+    
+    local dropBtn = Instance.new("TextButton")
+    dropBtn.Size = UDim2.new(1, 0, 0, 35)
+    dropBtn.Position = UDim2.new(0, 0, 0, 20)
+    dropBtn.Text = "Select " .. category .. "..."
+    dropBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    dropBtn.TextColor3 = Color3.new(1, 1, 1)
+    dropBtn.Parent = container
+    
+    local list = Instance.new("ScrollingFrame")
+    list.Size = UDim2.new(1, 0, 0, math.min(#options * 30, 150))
+    list.Position = UDim2.new(0, 0, 1, 0)
+    list.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    list.Visible = false
+    list.ZIndex = 10
+    list.CanvasSize = UDim2.new(0, 0, 0, #options * 30)
+    list.ScrollBarThickness = 4
+    list.Parent = dropBtn
+    
+    local ll = Instance.new("UIListLayout")
+    ll.Parent = list
+    
+    dropBtn.MouseButton1Click:Connect(function()
+        list.Visible = not list.Visible
+    end)
+    
+    for _, opt in ipairs(options) do
+        local optBtn = Instance.new("TextButton")
+        optBtn.Size = UDim2.new(1, 0, 0, 30)
+        optBtn.Text = opt
+        optBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+        optBtn.TextColor3 = Color3.new(1, 1, 1)
+        optBtn.ZIndex = 11
+        optBtn.Parent = list
+        
+        optBtn.MouseButton1Click:Connect(function()
+            dropBtn.Text = opt
+            list.Visible = false
+            SetZone(category, opt)
+        end)
+    end
+end
+
+-- Initialize Dropdowns with dynamic data
+CreateDropdown("BODY TOUGHNESS", "BT")
+CreateDropdown("FIST STRENGTH", "FS")
+CreateDropdown("PSYCHIC POWER", "PS")
 
 -- Close Button
 local Close = Instance.new("TextButton")
-Close.Size = UDim2.new(0, 200, 0, 30)
-Close.Text = "CLOSE"
+Close.Size = UDim2.new(0, 250, 0, 35)
+Close.Position = UDim2.new(0, 0, 1, -35)
+Close.Text = "CLOSE SCRIPT"
 Close.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
 Close.TextColor3 = Color3.new(1, 1, 1)
-Close.Font = Enum.Font.SourceSansBold
 Close.Parent = MainFrame
-Close.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
+Close.MouseButton1Click:Connect(function() 
+    -- Stop all background logic immediately
+    scriptRunning = false
+    
+    -- Return all parts to original spots before destroying UI
+    ReturnZone("BT")
+    ReturnZone("FS")
+    ReturnZone("PS")
+    
+    ScreenGui:Destroy() 
+end)
