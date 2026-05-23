@@ -1,0 +1,209 @@
+-- Safe check to ensure the game is fully loaded
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local localPlayer = Players.LocalPlayer
+
+-- Wait for the player's interface container to exist safely
+local playerGui = localPlayer:WaitForChild("PlayerGui", 10)
+if not playerGui then
+    warn("PlayerGui not found! Execution halted.")
+    return
+end
+
+-- Clean up any existing version of this specific menu to prevent overlapping UI
+if playerGui:FindFirstChild("LuckyBlockMenuGui") then
+	playerGui.LuckyBlockMenuGui:Destroy()
+end
+
+-- State Management variables
+local selectedRemote = nil
+local loopActive = false
+local loopDelay = 0.1 -- Time in seconds between spawns when looping
+
+-- 1. SCAN REPLICATED STORAGE
+local luckyBlocks = {}
+for _, child in ipairs(ReplicatedStorage:GetChildren()) do
+	if string.sub(child.Name, 1, 5) == "Spawn" then
+		local baseName = string.sub(child.Name, 6) 
+		local formattedName = baseName:gsub("(%l)(%u)", "%1 %2")
+		
+		table.insert(luckyBlocks, {
+			displayName = formattedName,
+			remoteInstance = child
+		})
+	end
+end
+
+-- 2. CREATE THE USER INTERFACE
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "LuckyBlockMenuGui"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = playerGui
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 300, 0, 180) -- Slightly taller to accommodate the loop button
+MainFrame.Position = UDim2.new(0.5, -150, 0.4, -200)
+MainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = MainFrame
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -40, 0, 40)
+Title.Position = UDim2.new(0, 15, 0, 0)
+Title.Text = "Lucky Block Spawner"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Font = Enum.Font.SourceSansBold
+Title.TextSize = 18
+Title.BackgroundTransparency = 1
+Title.Parent = MainFrame
+
+local CloseButton = Instance.new("TextButton")
+CloseButton.Size = UDim2.new(0, 30, 0, 30)
+CloseButton.Position = UDim2.new(1, -35, 0, 5)
+CloseButton.Text = "X"
+CloseButton.TextColor3 = Color3.fromRGB(255, 100, 100)
+CloseButton.Font = Enum.Font.SourceSansBold
+CloseButton.TextSize = 18
+CloseButton.BackgroundTransparency = 1
+CloseButton.Parent = MainFrame
+
+-- Terminate loop and UI on close
+CloseButton.MouseButton1Click:Connect(function()
+	loopActive = false
+	ScreenGui:Destroy()
+end)
+
+-- Dropdown Header Button
+local DropdownHeader = Instance.new("TextButton")
+DropdownHeader.Size = UDim2.new(1, -30, 0, 40)
+DropdownHeader.Position = UDim2.new(0, 15, 0, 55)
+DropdownHeader.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+DropdownHeader.Text = "Select a Lucky Block v"
+DropdownHeader.TextColor3 = Color3.fromRGB(200, 200, 200)
+DropdownHeader.Font = Enum.Font.SourceSans
+DropdownHeader.TextSize = 16
+DropdownHeader.BorderSizePixel = 0
+DropdownHeader.Parent = MainFrame
+
+local DropdownCorner = Instance.new("UICorner")
+DropdownCorner.CornerRadius = UDim.new(0, 4)
+DropdownCorner.Parent = DropdownHeader
+
+-- Loop Toggle Button
+local LoopButton = Instance.new("TextButton")
+LoopButton.Size = UDim2.new(1, -30, 0, 45)
+LoopButton.Position = UDim2.new(0, 15, 0, 110)
+LoopButton.BackgroundColor3 = Color3.fromRGB(150, 50, 50) -- Default Red (OFF)
+LoopButton.Text = "Loop Spawner: OFF"
+LoopButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+LoopButton.Font = Enum.Font.SourceSansBold
+LoopButton.TextSize = 16
+LoopButton.BorderSizePixel = 0
+LoopButton.Parent = MainFrame
+
+local LoopCorner = Instance.new("UICorner")
+LoopCorner.CornerRadius = UDim.new(0, 4)
+LoopCorner.Parent = LoopButton
+
+-- Dropdown Scrolling List (Layered over elements below it when open)
+local DropdownList = Instance.new("ScrollingFrame")
+DropdownList.Size = UDim2.new(1, -30, 0, 200)
+DropdownList.Position = UDim2.new(0, 15, 0, 100)
+DropdownList.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+DropdownList.BorderSizePixel = 0
+DropdownList.Visible = false
+DropdownList.ScrollBarThickness = 6
+DropdownList.ZIndex = 5 -- Makes sure dropdown renders *above* the loop button
+DropdownList.Parent = MainFrame
+
+local ListLayout = Instance.new("UIListLayout")
+ListLayout.Parent = DropdownList
+ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+DropdownHeader.MouseButton1Click:Connect(function()
+	DropdownList.Visible = not DropdownList.Visible
+end)
+
+-- 3. POPULATE DROPDOWN (Selection logic only)
+for i, blockData in ipairs(luckyBlocks) do
+	local ItemButton = Instance.new("TextButton")
+	ItemButton.Size = UDim2.new(1, 0, 0, 35)
+	ItemButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+	ItemButton.Text = "   " .. blockData.displayName
+	ItemButton.TextColor3 = Color3.fromRGB(230, 230, 230)
+	ItemButton.TextXAlignment = Enum.TextXAlignment.Left
+	ItemButton.Font = Enum.Font.SourceSans
+	ItemButton.TextSize = 15
+	ItemButton.BorderSizePixel = 0
+	ItemButton.ZIndex = 5
+	ItemButton.Parent = DropdownList
+	
+	ItemButton.MouseEnter:Connect(function()
+		ItemButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+	end)
+	ItemButton.MouseLeave:Connect(function()
+		ItemButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+	end)
+	
+	ItemButton.MouseButton1Click:Connect(function()
+		-- Update selection state without executing yet
+		selectedRemote = blockData.remoteInstance
+		DropdownHeader.Text = blockData.displayName .. " v"
+		DropdownList.Visible = false
+	end)
+end
+
+-- 4. LOOP EXECUTION LOGIC
+LoopButton.MouseButton1Click:Connect(function()
+	-- Prevent activating if no block is selected yet
+	if not selectedRemote then
+		DropdownHeader.Text = "⚠️ SELECT A BLOCK FIRST!"
+		task.delay(1.5, function()
+			if not selectedRemote then DropdownHeader.Text = "Select a Lucky Block v" end
+		end)
+		return
+	end
+
+	-- Toggle active state
+	loopActive = not loopActive
+
+	if loopActive then
+		LoopButton.Text = "Loop Spawner: ON"
+		LoopButton.BackgroundColor3 = Color3.fromRGB(50, 150, 50) -- Green
+		
+		-- Run the loop on a non-blocking background thread
+		task.spawn(function()
+			while loopActive and selectedRemote do
+				if selectedRemote:IsA("RemoteEvent") then
+					selectedRemote:FireServer()
+				elseif selectedRemote:IsA("RemoteFunction") then
+					selectedRemote:InvokeServer()
+				end
+				task.wait(loopDelay) -- Fast controlled interval
+			end
+		end)
+	else
+		-- Turn loop off
+		loopActive = false
+		LoopButton.Text = "Loop Spawner: OFF"
+		LoopButton.BackgroundColor3 = Color3.fromRGB(150, 50, 50) -- Red
+	end
+end)
+
+-- Canvas auto-scaling
+DropdownList.CanvasSize = UDim2.new(0, 0, 0, ListLayout.AbsoluteContentSize.Y)
+ListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+	DropdownList.CanvasSize = UDim2.new(0, 0, 0, ListLayout.AbsoluteContentSize.Y)
+end)
