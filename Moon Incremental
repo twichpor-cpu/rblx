@@ -1,0 +1,340 @@
+--// Services
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local ProximityPromptService = game:GetService("ProximityPromptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+local UserId = tostring(LocalPlayer.UserId)
+
+--// UI Creation
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "BismuthFarm_v2"
+ScreenGui.ResetOnSpawn = false
+
+-- Standard CoreGui protection for executors
+if syn and syn.protect_gui then
+    syn.protect_gui(ScreenGui)
+    ScreenGui.Parent = game:GetService("CoreGui")
+elseif gethui then
+    ScreenGui.Parent = gethui()
+else
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
+
+-- Main Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 300, 0, 320)
+MainFrame.Position = UDim2.new(0.5, -150, 0.4, -160)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+-- Title
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -30, 0, 30)
+Title.Position = UDim2.new(0, 10, 0, 0)
+Title.Text = "Bismuth & Stage Farm v2"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.BackgroundTransparency = 1
+Title.Font = Enum.Font.SourceSansBold
+Title.TextSize = 18
+Title.Parent = MainFrame
+
+-- Close Button
+local CloseButton = Instance.new("TextButton")
+CloseButton.Name = "CloseButton"
+CloseButton.Size = UDim2.new(0, 30, 0, 30)
+CloseButton.Position = UDim2.new(1, -30, 0, 0)
+CloseButton.Text = "X"
+CloseButton.TextColor3 = Color3.fromRGB(255, 70, 70)
+CloseButton.BackgroundTransparency = 1
+CloseButton.Font = Enum.Font.SourceSansBold
+CloseButton.TextSize = 18
+CloseButton.Parent = MainFrame
+
+-- UI Layout
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.Padding = UDim.new(0, 10)
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local Container = Instance.new("Frame")
+Container.Size = UDim2.new(1, -20, 1, -40)
+Container.Position = UDim2.new(0, 10, 0, 35)
+Container.BackgroundTransparency = 1
+Container.Parent = MainFrame
+UIListLayout.Parent = Container
+
+-- Helper function to create switches
+local function createSwitch(name, text, layoutOrder)
+    local Button = Instance.new("TextButton")
+    Button.Name = name
+    Button.Size = UDim2.new(1, 0, 0, 40)
+    Button.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    Button.Text = text .. ": OFF"
+    Button.TextColor3 = Color3.fromRGB(255, 100, 100)
+    Button.Font = Enum.Font.SourceSansSemibold
+    Button.TextSize = 16
+    Button.LayoutOrder = layoutOrder
+    Button.Parent = Container
+    
+    local UICorner = Instance.new("UICorner")
+    UICorner.CornerRadius = UDim.new(0, 6)
+    UICorner.Parent = Button
+    
+    return Button
+end
+
+-- Toggles
+local MasterFarmButton = createSwitch("MasterFarmToggle", "Auto Farm Everything", 1)
+local AstralFarmButton = createSwitch("AstralFarmToggle", "Auto Collect Astral Chunks", 2)
+local MiningFarmButton = createSwitch("MiningFarmToggle", "Auto Mining Zone", 3)
+local DiamondFarmButton = createSwitch("DiamondFarmToggle", "Auto Collect Diamond", 4)
+
+--// States
+local FarmEnabled = false
+local AstralEnabled = false
+local MiningEnabled = false
+local DiamondEnabled = false
+
+--// Close Button Functionality
+CloseButton.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+    FarmEnabled = false
+    AstralEnabled = false
+    MiningEnabled = false
+    DiamondEnabled = false
+end)
+
+--// Master Toggle Click Connection
+MasterFarmButton.MouseButton1Click:Connect(function()
+    FarmEnabled = not FarmEnabled
+    if FarmEnabled then
+        MasterFarmButton.Text = "Auto Farm Everything: ON"
+        MasterFarmButton.BackgroundColor3 = Color3.fromRGB(40, 80, 40)
+        MasterFarmButton.TextColor3 = Color3.fromRGB(100, 255, 100)
+    else
+        MasterFarmButton.Text = "Auto Farm Everything: OFF"
+        MasterFarmButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        MasterFarmButton.TextColor3 = Color3.fromRGB(255, 100, 100)
+    end
+end)
+
+--// Astral Toggle Click Connection
+AstralFarmButton.MouseButton1Click:Connect(function()
+    AstralEnabled = not AstralEnabled
+    if AstralEnabled then
+        AstralFarmButton.Text = "Auto Collect Astral Chunks: ON"
+        AstralFarmButton.BackgroundColor3 = Color3.fromRGB(40, 80, 40)
+        AstralFarmButton.TextColor3 = Color3.fromRGB(100, 255, 100)
+    else
+        AstralFarmButton.Text = "Auto Collect Astral Chunks: OFF"
+        AstralFarmButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        AstralFarmButton.TextColor3 = Color3.fromRGB(255, 100, 100)
+    end
+end)
+
+--// Mining Toggle Click Connection
+MiningFarmButton.MouseButton1Click:Connect(function()
+    MiningEnabled = not MiningEnabled
+    if MiningEnabled then
+        MiningFarmButton.Text = "Auto Mining Zone: ON"
+        MiningFarmButton.BackgroundColor3 = Color3.fromRGB(40, 80, 40)
+        MiningFarmButton.TextColor3 = Color3.fromRGB(100, 255, 100)
+    else
+        MiningFarmButton.Text = "Auto Mining Zone: OFF"
+        MiningFarmButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        MiningFarmButton.TextColor3 = Color3.fromRGB(255, 100, 100)
+    end
+end)
+
+--// Diamond Toggle Click Connection
+DiamondFarmButton.MouseButton1Click:Connect(function()
+    DiamondEnabled = not DiamondEnabled
+    if DiamondEnabled then
+        DiamondFarmButton.Text = "Auto Collect Diamond: ON"
+        DiamondFarmButton.BackgroundColor3 = Color3.fromRGB(40, 80, 40)
+        DiamondFarmButton.TextColor3 = Color3.fromRGB(100, 255, 100)
+    else
+        DiamondFarmButton.Text = "Auto Collect Diamond: OFF"
+        DiamondFarmButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        DiamondFarmButton.TextColor3 = Color3.fromRGB(255, 100, 100)
+    end
+end)
+
+--// 1. Auto Bismuth Logic Loop
+task.spawn(function()
+    while task.wait(0.1) do
+        if FarmEnabled then
+            local character = LocalPlayer.Character
+            local torso = character and (character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso"))
+            local itemsFolder = Workspace:FindFirstChild("Items")
+            
+            if torso and itemsFolder then
+                for _, item in ipairs(itemsFolder:GetChildren()) do
+                    if item:IsA("BasePart") and item:FindFirstChildOfClass("TouchTransmitter") then
+                        item.CFrame = torso.CFrame
+                    elseif item:IsA("Model") then
+                        for _, subPart in ipairs(item:GetDescendants()) do
+                            if subPart:IsA("BasePart") and subPart:FindFirstChildOfClass("TouchTransmitter") then
+                                subPart.CFrame = torso.CFrame
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+--// 2. Auto Stage Reward Logic Loop
+task.spawn(function()
+    while true do
+        if FarmEnabled then
+            local character = LocalPlayer.Character
+            local torso = character and (character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso"))
+            local originalCFrame = torso and torso.CFrame
+            
+            for i = 1, 25 do
+                if not FarmEnabled then break end
+                
+                character = LocalPlayer.Character
+                torso = character and (character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso"))
+                
+                if torso then
+                    local buttonName = "StageButton" .. i
+                    local buttonInstance = Workspace:FindFirstChild(buttonName, true)
+                    
+                    if buttonInstance then
+                        local prompt = buttonInstance:FindFirstChildOfClass("ProximityPrompt") or buttonInstance:FindFirstChild("ProximityPrompt", true)
+                        
+                        if prompt then
+                            local buttonPart = prompt.Parent
+                            if buttonPart and buttonPart:IsA("BasePart") then
+                                torso.CFrame = buttonPart.CFrame + Vector3.new(0, 3, 0)
+                                task.wait(0.15)
+                                
+                                if fireproximityprompt then
+                                    fireproximityprompt(prompt, 1)
+                                else
+                                    prompt:InputHoldBegin()
+                                    task.wait(prompt.HoldDuration + 0.05)
+                                    prompt:InputHoldEnd()
+                                end
+                                task.wait(0.1)
+                            end
+                        end
+                    end
+                end
+            end
+            
+            if FarmEnabled and torso and originalCFrame then
+                torso.CFrame = originalCFrame
+            end
+            task.wait(300.1)
+        else
+            task.wait(1)
+        end
+    end
+end)
+
+--// 3. Auto Astral Chunk Logic Loop
+task.spawn(function()
+    while task.wait(0.1) do
+        if AstralEnabled then
+            local character = LocalPlayer.Character
+            local torso = character and (character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso"))
+            
+            if torso then
+                for _, item in ipairs(Workspace:GetChildren()) do
+                    if item.Name == "AstralChunk" or string.match(item.Name, "AstralChunk") then
+                        if item:IsA("BasePart") then
+                            item.CFrame = torso.CFrame
+                        elseif item:IsA("Model") then
+                            local targetPart = item.PrimaryPart or item:FindFirstChildOfClass("BasePart")
+                            if targetPart then
+                                targetPart.CFrame = torso.CFrame
+                            else
+                                for _, subPart in ipairs(item:GetDescendants()) do
+                                    if subPart:IsA("BasePart") then
+                                        subPart.CFrame = torso.CFrame
+                                        break
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+--// 4. Auto Mining Logic Loop
+task.spawn(function()
+    local MineRockEvent = ReplicatedStorage:WaitForChild("MineRock", 10)
+    
+    while task.wait(0.1) do
+        if MiningEnabled then
+            local character = LocalPlayer.Character
+            local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
+            
+            if humanoidRootPart then
+                local function manipulatePart(partInstance)
+                    if not partInstance then return end
+                    
+                    if partInstance:IsA("BasePart") then
+                        partInstance.CFrame = humanoidRootPart.CFrame
+                        partInstance.CanCollide = false
+                        partInstance.Transparency = 1
+                    elseif partInstance:IsA("Model") then
+                        partInstance:PivotTo(humanoidRootPart.CFrame)
+                        for _, desc in ipairs(partInstance:GetDescendants()) do
+                            if desc:IsA("BasePart") then
+                                desc.CanCollide = false
+                                desc.Transparency = 1
+                            end
+                        end
+                    end
+                end
+                
+                -- 1. Manipulate Mining Zone (workspace.Cave.MiningZone)
+                local cave = Workspace:FindFirstChild("Cave")
+                local miningZone = cave and cave:FindFirstChild("MiningZone") or Workspace:FindFirstChild("MiningZone", true)
+                if miningZone then
+                    manipulatePart(miningZone)
+                end
+
+                -- 2. Find, Manipulate, and Fire Remote on the personal player Ore (workspace.Cave.Ore_UserID)
+                if cave and MineRockEvent then
+                    local playerOreName = "Ore_" .. UserId
+                    local playerOre = cave:FindFirstChild(playerOreName)
+                    
+                    if playerOre then
+                        manipulatePart(playerOre)
+                        MineRockEvent:FireServer(playerOre)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+--// 5. Auto Collect Diamond Logic Loop (Fires every 15 seconds)
+task.spawn(function()
+    local MineshaftCollectEvent = ReplicatedStorage:WaitForChild("MineshaftCollect", 10)
+    
+    while true do
+        if DiamondEnabled and MineshaftCollectEvent then
+            MineshaftCollectEvent:FireServer()
+            task.wait(16)
+        else
+            task.wait(0.5)
+        end
+    end
+end)
