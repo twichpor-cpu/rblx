@@ -1,0 +1,387 @@
+--[[
+    CUSTOM RESPONSIVE CAR SHOP UI (ROBLOX LUA)
+    Features:
+    - Draggable Window (Modern smooth dragging)
+    - Resizable Window (Scale-invariant, interactive handle on bottom-right)
+    - Auto-adjusting Grid Layout (Resizes cleanly alongside the window)
+    - Dynamic Page Scanning (Handles "Page1", "page11", and "ppage20" naming anomalies)
+    - Clean Modern Design (Dark Mode theme with rounded corners and drop-shadow styling)
+    - Interactive Spawning: Automatically despawns current vehicle and spawns selected one
+--]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+-- 1. Create ScreenGui
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "CustomCarShopGui"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = PlayerGui
+
+-- 2. Base Modern Theme Configuration
+local THEME = {
+    Background = Color3.fromRGB(24, 25, 28),
+    Header = Color3.fromRGB(32, 34, 37),
+    CardBg = Color3.fromRGB(47, 49, 54),
+    Accent = Color3.fromRGB(88, 101, 242), -- Nice Discord-like Blurple
+    Text = Color3.fromRGB(255, 255, 255),
+    TextMuted = Color3.fromRGB(185, 187, 190),
+    Border = Color3.fromRGB(54, 57, 63)
+}
+
+-- 3. Main Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 450, 0, 350)
+MainFrame.Position = UDim2.new(0.5, -225, 0.5, -175)
+MainFrame.BackgroundColor3 = THEME.Background
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 8)
+MainCorner.Parent = MainFrame
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Thickness = 1.5
+MainStroke.Color = THEME.Border
+MainStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+MainStroke.Parent = MainFrame
+
+-- Drop shadow using standard Roblox UI techniques
+local Shadow = Instance.new("Frame")
+Shadow.Name = "Shadow"
+Shadow.Size = UDim2.new(1, 10, 1, 10)
+Shadow.Position = UDim2.new(0, -5, 0, -5)
+Shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+Shadow.BackgroundTransparency = 0.8
+Shadow.ZIndex = 0
+Shadow.Parent = MainFrame
+
+local ShadowCorner = Instance.new("UICorner")
+ShadowCorner.CornerRadius = UDim.new(0, 10)
+ShadowCorner.Parent = Shadow
+
+-- 4. Header Bar (For Title & Dragging)
+local Header = Instance.new("Frame")
+Header.Name = "Header"
+Header.Size = UDim2.new(1, 0, 0, 40)
+Header.BackgroundColor3 = THEME.Header
+Header.BorderSizePixel = 0
+Header.Parent = MainFrame
+
+local HeaderCorner = Instance.new("UICorner")
+HeaderCorner.CornerRadius = UDim.new(0, 8)
+HeaderCorner.Parent = Header
+
+-- Cover bottom rounded corners of the header frame to blend with background
+local HeaderCover = Instance.new("Frame")
+HeaderCover.Size = UDim2.new(1, 0, 0.5, 0)
+HeaderCover.Position = UDim2.new(0, 0, 0.5, 0)
+HeaderCover.BackgroundColor3 = THEME.Header
+HeaderCover.BorderSizePixel = 0
+HeaderCover.ZIndex = Header.ZIndex
+HeaderCover.Parent = Header
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Name = "TitleLabel"
+TitleLabel.Size = UDim2.new(1, -50, 1, 0)
+TitleLabel.Position = UDim2.new(0, 12, 0, 0)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.TextColor3 = THEME.Text
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.TextSize = 14
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.Text = "AVAILABLE VEHICLES"
+TitleLabel.Parent = Header
+
+-- 5. Close Button
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Name = "CloseBtn"
+CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseBtn.Position = UDim2.new(1, -35, 0, 5)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(240, 71, 71)
+CloseBtn.Text = "✕"
+CloseBtn.TextColor3 = THEME.Text
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 14
+CloseBtn.AutoButtonColor = true
+CloseBtn.Parent = Header
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 6)
+CloseCorner.Parent = CloseBtn
+
+CloseBtn.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+end)
+
+-- 6. Scrollable Window Container (Under Header)
+local ScrollFrame = Instance.new("ScrollingFrame")
+ScrollFrame.Name = "CarScrollFrame"
+ScrollFrame.Size = UDim2.new(1, -20, 1, -65)
+ScrollFrame.Position = UDim2.new(0, 10, 0, 50)
+ScrollFrame.BackgroundTransparency = 1
+ScrollFrame.BorderSizePixel = 0
+ScrollFrame.ScrollBarThickness = 6
+ScrollFrame.ScrollBarImageColor3 = THEME.Accent
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0) -- Controlled by grid layout
+ScrollFrame.Parent = MainFrame
+
+-- Grid Layout (Autosizes elements depending on container scale)
+local UIGridLayout = Instance.new("UIGridLayout")
+UIGridLayout.Parent = ScrollFrame
+UIGridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIGridLayout.CellPadding = UDim2.new(0, 10, 0, 10)
+UIGridLayout.CellSize = UDim2.new(0, 125, 0, 135) -- Dynamic resizing handled below
+
+-- Keep canvas size scaling automatically
+UIGridLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, UIGridLayout.AbsoluteContentSize.Y + 15)
+end)
+
+-- Responsive grid element calculation when frame resizing happens
+local function updateGridCellSizes()
+    local frameWidth = ScrollFrame.AbsoluteSize.X
+    -- Aim to fit columns cleanly depending on available width
+    local columns = math.max(2, math.floor(frameWidth / 135))
+    local padding = 10
+    local availableWidth = frameWidth - (padding * (columns - 1)) - 6 -- Offset for Scrollbar
+    local dynamicCellWidth = math.floor(availableWidth / columns)
+    
+    UIGridLayout.CellSize = UDim2.new(0, dynamicCellWidth, 0, dynamicCellWidth + 15)
+end
+ScrollFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateGridCellSizes)
+
+-- 7. Resize Handle Frame (Interactive bottom right)
+local ResizeHandle = Instance.new("ImageButton")
+ResizeHandle.Name = "ResizeHandle"
+ResizeHandle.Size = UDim2.new(0, 16, 0, 16)
+ResizeHandle.Position = UDim2.new(1, -16, 1, -16)
+ResizeHandle.BackgroundTransparency = 1
+-- Standard diagonal drag icon fallback built with an rotated text
+ResizeHandle.Image = "rbxassetid://413387034" -- subtle corner resize texture
+ResizeHandle.ZIndex = 5
+ResizeHandle.Parent = MainFrame
+
+-- 8. Dragging & Draggability Logic
+local dragInput, dragStart, startPos
+local dragging = false
+
+local function updateDrag(input)
+    local delta = input.Position - dragStart
+    local targetPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    
+    -- Tween drag for clean physics feel
+    TweenService:Create(MainFrame, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Position = targetPos
+    }):Play()
+end
+
+Header.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+Header.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        updateDrag(input)
+    end
+end)
+
+-- 9. Window Resizing Logic
+local resizing = false
+local resizeStartPos
+local resizeStartSize
+
+ResizeHandle.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        resizing = true
+        resizeStartPos = input.Position
+        resizeStartSize = MainFrame.AbsoluteSize
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                resizing = false
+            end
+        end)
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - resizeStartPos
+        -- Restrict limits so window doesn't crash to size 0
+        local newWidth = math.max(300, resizeStartSize.X + delta.X)
+        local newHeight = math.max(220, resizeStartSize.Y + delta.Y)
+        
+        MainFrame.Size = UDim2.new(0, newWidth, 0, newHeight)
+        updateGridCellSizes()
+    end
+end)
+
+
+-- 10. Core Dynamic Car Scanner
+-- Explaining why: We will scan "CarShop.Frame" looking for children. 
+-- To support the inconsistent naming patterns ("Page1", "page11", "ppage20"), 
+-- we convert names to lowercase and match against "page%d+" (page followed by numbers)
+-- and "ppage%d+" (ppage followed by numbers).
+local function createCarCard(carName, imageId)
+    -- Changed from Frame to TextButton to handle user interaction cleanly
+    local Card = Instance.new("TextButton")
+    Card.Name = carName.."Card"
+    Card.BackgroundColor3 = THEME.CardBg
+    Card.BorderSizePixel = 0
+    Card.Text = "" -- Keep blank to allow custom GUI layout inside
+    Card.AutoButtonColor = false -- Disable default dark overlay to maintain custom design
+    Card.Parent = ScrollFrame
+
+    local CardCorner = Instance.new("UICorner")
+    CardCorner.CornerRadius = UDim.new(0, 6)
+    CardCorner.Parent = Card
+
+    -- Shadow-like outline for card
+    local CardStroke = Instance.new("UIStroke")
+    CardStroke.Color = THEME.Border
+    CardStroke.Thickness = 1
+    CardStroke.Parent = Card
+
+    -- Image Box
+    local CarImage = Instance.new("ImageLabel")
+    CarImage.Name = "CarImage"
+    CarImage.Size = UDim2.new(1, -12, 0.7, -6)
+    CarImage.Position = UDim2.new(0, 6, 0, 6)
+    CarImage.BackgroundTransparency = 1
+    CarImage.Image = imageId
+    CarImage.ScaleType = Enum.ScaleType.Fit
+    CarImage.Parent = Card
+
+    -- Name Plate Label
+    local CarLabel = Instance.new("TextLabel")
+    CarLabel.Name = "CarLabel"
+    CarLabel.Size = UDim2.new(1, -12, 0.3, -6)
+    CarLabel.Position = UDim2.new(0, 6, 0.7, 4)
+    CarLabel.BackgroundTransparency = 1
+    CarLabel.TextColor3 = THEME.Text
+    CarLabel.Font = Enum.Font.GothamBold
+    CarLabel.TextSize = 12
+    CarLabel.TextXAlignment = Enum.TextXAlignment.Center
+    -- Capitalize first letter of car names nicely
+    CarLabel.Text = carName:sub(1,1):upper() .. carName:sub(2):lower()
+    CarLabel.Parent = Card
+
+    -- Hover effect animations
+    Card.MouseEnter:Connect(function()
+        TweenService:Create(CardStroke, TweenInfo.new(0.15), {Color = THEME.Accent}):Play()
+    end)
+    Card.MouseLeave:Connect(function()
+        TweenService:Create(CardStroke, TweenInfo.new(0.15), {Color = THEME.Border}):Play()
+    end)
+
+    -- Interaction: Trigger Despawn and Spawn events sequentially on click
+    Card.MouseButton1Click:Connect(function()
+        -- 1. Despawn any vehicle currently spawned by the user
+        local DespawnEvent = ReplicatedStorage:FindFirstChild("DespawnCar")
+        if DespawnEvent and DespawnEvent:IsA("RemoteEvent") then
+            DespawnEvent:FireServer(nil)
+        else
+            warn("Custom Car Shop UI: 'DespawnCar' RemoteEvent not found in ReplicatedStorage!")
+        end
+        
+        -- Brief safety wait to allow the despawn event to complete processing
+        task.wait(0.1)
+        
+        -- 2. Spawn the selected vehicle (passes the exact string name e.g. "clio")
+        local SpawnEvent = ReplicatedStorage:FindFirstChild("SpawnCar")
+        if SpawnEvent and SpawnEvent:IsA("RemoteEvent") then
+            SpawnEvent:FireServer(carName)
+        else
+            warn("Custom Car Shop UI: 'SpawnCar' RemoteEvent not found in ReplicatedStorage!")
+        end
+    end)
+end
+
+local function scanCarShopPages()
+    local CarShop = PlayerGui:WaitForChild("CarShop", 5)
+    if not CarShop then
+        warn("Custom Car Shop UI: Could not locate 'PlayerGui.CarShop'")
+        return
+    end
+
+    local Frame = CarShop:WaitForChild("Frame", 5)
+    if not Frame then
+        warn("Custom Car Shop UI: Could not locate 'PlayerGui.CarShop.Frame'")
+        return
+    end
+
+    -- Clear previous items
+    for _, child in ipairs(ScrollFrame:GetChildren()) do
+        if child:IsA("Frame") or child:IsA("TextButton") then
+            child:Destroy()
+        end
+    end
+
+    local foundCars = 0
+
+    -- Iterate through Frame to find all Page objects dynamically
+    for _, page in ipairs(Frame:GetChildren()) do
+        local lowerName = page.Name:lower()
+        -- Robust checking pattern matches: "page1" through "page19", "ppage20" onwards, etc.
+        if lowerName:match("^page%d+$") or lowerName:match("^ppage%d+$") then
+            local carsFolder = page:FindFirstChild("cars")
+            if carsFolder then
+                for _, carLabel in ipairs(carsFolder:GetChildren()) do
+                    if carLabel:IsA("ImageLabel") then
+                        -- Name (e.g., "clio", "megane")
+                        local carName = carLabel.Name
+                        -- Image Asset URL
+                        local imageId = carLabel.Image
+                        
+                        -- Generate card inside our custom view list
+                        createCarCard(carName, imageId)
+                        foundCars = foundCars + 1
+                    end
+                end
+            end
+        end
+    end
+
+    -- Update Layout Grid parameters once
+    updateGridCellSizes()
+
+    if foundCars == 0 then
+         -- Fallback display label in case no images were found
+         local TempText = Instance.new("TextLabel")
+         TempText.Size = UDim2.new(1, 0, 1, 0)
+         TempText.BackgroundTransparency = 1
+         TempText.Text = "No vehicles found in shop metadata!"
+         TempText.TextColor3 = THEME.TextMuted
+         TempText.Font = Enum.Font.Gotham
+         TempText.TextSize = 14
+         TempText.Parent = ScrollFrame
+    end
+end
+
+-- Initialize page scanner
+task.spawn(scanCarShopPages)
