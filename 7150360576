@@ -133,12 +133,12 @@ local function refreshList()
         ButtonCorner.CornerRadius = UDim.new(0, 4)
         ButtonCorner.Parent = ItemButton
         
-        -- Teleport logic on click
+        -- Teleport logic on click (Fixed for rotated/upside-down items)
         ItemButton.MouseButton1Click:Connect(function()
             local targetPart = getClosestItem(itemName)
             if targetPart and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                -- Teleport slightly above the item to avoid clipping into the ground
-                LocalPlayer.Character.HumanoidRootPart.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
+                -- Strips rotation, adds 3 studs strictly UP in world space, and keeps player upright
+                LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 3, 0))
             end
         end)
     end
