@@ -22,7 +22,12 @@ local itemBlacklist = {
     ["Sprite Cranberry"] = true,
     ["Mountain Dew"] = true,
     ["Sprite"] = true,
-    ["Chirumiru"] = true, 
+    ["Chirumiru"] = true,
+	["Chocolate Milk"] = true,
+	["Prime Energy"] = true,
+	["Bloxy Cola"] = true,
+	["Coca-Cola"] = true,
+	["Monster Energy"] = true
 }
 
 -- Variables for Sizing / Sorting States
