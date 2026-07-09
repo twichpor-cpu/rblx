@@ -8,6 +8,7 @@ local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
 
 -- Target Folder
 local spawnedToolsFolder = Workspace:WaitForChild("SpawnedTools", 10)
@@ -23,11 +24,11 @@ local itemBlacklist = {
     ["Mountain Dew"] = true,
     ["Sprite"] = true,
     ["Chirumiru"] = true,
-	["Chocolate Milk"] = true,
-	["Prime Energy"] = true,
-	["Bloxy Cola"] = true,
-	["Coca-Cola"] = true,
-	["Monster Energy"] = true
+    ["Chocolate Milk"] = true,
+    ["Prime Energy"] = true,
+    ["Bloxy Cola"] = true,
+    ["Coca-Cola"] = true,
+    ["Monster Energy"] = true
 }
 
 -- Variables for Sizing / Sorting States
@@ -36,6 +37,12 @@ local currentSortMode = "Count"
 local expandedHeight = 350
 local collapsedHeight = 40
 local minHeight = 120
+
+-- Camera Spectator State Variables
+local currentlyViewedItem = nil
+local viewedInstancesList = {}
+local currentViewIndex = 1
+local activeEyeButtons = {}
 
 -- Create GUI Elements
 local ScreenGui = Instance.new("ScreenGui")
@@ -76,12 +83,12 @@ Title.Parent = MainFrame
 -- Close Button (Fixed sizing and position alignment to eliminate text-bleeding)
 local CloseButton = Instance.new("TextButton")
 CloseButton.Size = UDim2.new(0, 24, 0, 24)
-CloseButton.Position = UDim2.new(1, -34, 0, 8) -- Centered vertically within the 40px top bar
+CloseButton.Position = UDim2.new(1, -34, 0, 8)
 CloseButton.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
 CloseButton.BorderSizePixel = 0
 CloseButton.Text = "X"
 CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-CloseButton.TextSize = 13 -- Slightly optimized font size to fit neatly inside container bounding box
+CloseButton.TextSize = 13
 CloseButton.Font = Enum.Font.SourceSansBold
 CloseButton.Parent = MainFrame
 
@@ -184,27 +191,57 @@ end)
 local activeButtons = {}
 local lastTrackedPosition = Vector3.new(0, 0, 0)
 
-local function getClosestItemData(itemName)
+-- Helper function to reset camera smoothly back to the player
+local function resetCameraToPlayer()
+    currentlyViewedItem = nil
+    viewedInstancesList = {}
+    currentViewIndex = 1
+    
     local character = LocalPlayer.Character
-    if not character or not character:FindFirstChild("HumanoidRootPart") then return nil, nil end
+    if character then
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            Camera.CameraSubject = humanoid
+        end
+    end
     
-    local playerPos = character.HumanoidRootPart.Position
-    local shortestDistance = math.huge
-    local closestPart = nil
+    -- Reset colors of all eye icons back to default
+    for _, btn in pairs(activeEyeButtons) do
+        btn.TextColor3 = Color3.fromRGB(150, 150, 150)
+    end
+end
+
+-- Compiles all parts associated with a specific tool name sorted by proximity
+local function getAllInstancesOfItem(itemName)
+    local character = LocalPlayer.Character
+    local playerPos = character and character:FindFirstChild("HumanoidRootPart") and character.HumanoidRootPart.Position or Vector3.new(0,0,0)
     
+    local items = {}
     for _, item in ipairs(spawnedToolsFolder:GetChildren()) do
         if item and item.Name and item.Name == itemName and not itemBlacklist[item.Name] then
             local itemPart = item:FindFirstChild("Handle") or item:FindFirstChildOfClass("Part") or item:FindFirstChildOfClass("MeshPart") or item
             if itemPart and itemPart:IsA("BasePart") then
-                local distance = (playerPos - itemPart.Position).Magnitude
-                if distance < shortestDistance then
-                    shortestDistance = distance
-                    closestPart = itemPart
-                end
+                table.insert(items, {Part = itemPart, Dist = (playerPos - itemPart.Position).Magnitude})
             end
         end
     end
-    return closestPart, shortestDistance
+    
+    -- Sort instances so index 1 is always the closest one
+    table.sort(items, function(a, b) return a.Dist < b.Dist end)
+    
+    local finalPartsList = {}
+    for _, info in ipairs(items) do
+        table.insert(finalPartsList, info.Part)
+    end
+    return finalPartsList
+end
+
+local function getClosestItemData(itemName)
+    local instances = getAllInstancesOfItem(itemName)
+    if #instances > 0 then
+        return instances[1], instances[1].Parent and (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and (LocalPlayer.Character.HumanoidRootPart.Position - instances[1].Position).Magnitude or math.huge)
+    end
+    return nil, nil
 end
 
 local function updateDistances()
@@ -226,6 +263,7 @@ end
 
 local function refreshList()
     activeButtons = {}
+    activeEyeButtons = {}
     for _, child in ipairs(ScrollingFrame:GetChildren()) do
         if child:IsA("TextButton") then child:Destroy() end
     end
@@ -268,7 +306,7 @@ local function refreshList()
         local displayName = (data.Count > 1) and (data.Name .. " x" .. data.Count) or data.Name
         
         local NameLabel = Instance.new("TextLabel")
-        NameLabel.Size = UDim2.new(0.65, 0, 1, 0)
+        NameLabel.Size = UDim2.new(0.5, 0, 1, 0) -- Scaled down slightly to leave space for eye button
         NameLabel.Position = UDim2.new(0, 10, 0, 0)
         NameLabel.BackgroundTransparency = 1
         NameLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -279,8 +317,8 @@ local function refreshList()
         NameLabel.Parent = ItemButton
         
         local DistanceLabel = Instance.new("TextLabel")
-        DistanceLabel.Size = UDim2.new(0.3, 0, 1, 0)
-        DistanceLabel.Position = UDim2.new(0.7, -10, 0, 0)
+        DistanceLabel.Size = UDim2.new(0.25, 0, 1, 0)
+        DistanceLabel.Position = UDim2.new(0.55, 0, 0, 0)
         DistanceLabel.BackgroundTransparency = 1
         DistanceLabel.TextXAlignment = Enum.TextXAlignment.Right
         DistanceLabel.Text = "--- studs"
@@ -289,14 +327,61 @@ local function refreshList()
         DistanceLabel.TextSize = 13
         DistanceLabel.Parent = ItemButton
         
-        activeButtons[data.Name] = DistanceLabel
+        -- Eye View/Spectate Button
+        local EyeButton = Instance.new("TextButton")
+        EyeButton.Size = UDim2.new(0, 30, 0, 30)
+        EyeButton.Position = UDim2.new(1, -35, 0, 2)
+        EyeButton.BackgroundTransparency = 1
+        EyeButton.Text = "👁"
+        EyeButton.TextColor3 = (currentlyViewedItem == data.Name) and Color3.fromRGB(120, 200, 255) or Color3.fromRGB(150, 150, 150)
+        EyeButton.TextSize = 15
+        EyeButton.Font = Enum.Font.SourceSansBold
+        EyeButton.Parent = ItemButton
         
+        activeButtons[data.Name] = DistanceLabel
+        activeEyeButtons[data.Name] = EyeButton
+        
+        -- Teleport functionality on main button row left click
         ItemButton.MouseButton1Click:Connect(function()
             local targetPart, _ = getClosestItemData(data.Name)
             if targetPart and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
                 LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 3, 0))
                 task.wait(0.05)
                 updateDistances()
+            end
+        end)
+        
+        -- View Button Left Click (Inspect) and Right Click (Cycle copies) Handler
+        EyeButton.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                -- Left Click Behavior
+                if currentlyViewedItem == data.Name then
+                    -- Left clicking the active item closes the view menu
+                    resetCameraToPlayer()
+                else
+                    -- Left clicking a new item closes old view and opens this one
+                    resetCameraToPlayer()
+                    viewedInstancesList = getAllInstancesOfItem(data.Name)
+                    
+                    if #viewedInstancesList > 0 then
+                        currentlyViewedItem = data.Name
+                        currentViewIndex = 1
+                        Camera.CameraSubject = viewedInstancesList[1]
+                        EyeButton.TextColor3 = Color3.fromRGB(120, 200, 255) -- Highlight active eye
+                    end
+                end
+            elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+                -- Right Click Behavior (Only handles if it's already the active viewed item type)
+                if currentlyViewedItem == data.Name then
+                    viewedInstancesList = getAllInstancesOfItem(data.Name) -- Refresh positions in case items were grabbed
+                    if #viewedInstancesList > 1 then
+                        currentViewIndex = currentViewIndex + 1
+                        if currentViewIndex > #viewedInstancesList then
+                            currentViewIndex = 1
+                        end
+                        Camera.CameraSubject = viewedInstancesList[currentViewIndex]
+                    end
+                end
             end
         end)
     end
@@ -317,6 +402,7 @@ end)
 
 -- Window Controls
 CloseButton.MouseButton1Click:Connect(function()
+    resetCameraToPlayer()
     ScreenGui:Destroy()
 end)
 
@@ -335,7 +421,16 @@ end)
 
 refreshList()
 spawnedToolsFolder.ChildAdded:Connect(refreshList)
-spawnedToolsFolder.ChildRemoved:Connect(refreshList)
+spawnedToolsFolder.ChildRemoved:Connect(function(item)
+    -- If the item currently being spectated gets deleted or picked up, safely reset camera to player
+    if currentlyViewedItem and item and item.Name == currentlyViewedItem then
+        local currentSubject = Camera.CameraSubject
+        if currentSubject == nil or currentSubject.Parent == item or currentSubject == item then
+            resetCameraToPlayer()
+        end
+    end
+    refreshList()
+end)
 
 -- Dynamic Distance Loop
 task.spawn(function()
