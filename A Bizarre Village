@@ -1,0 +1,152 @@
+-- Ensure the ScreenGui doesn't duplicate if executed multiple times
+local oldGui = game:GetService("CoreGui"):FindFirstChild("SpawnedItemsTracker") or game:GetService("Players").LocalPlayer:FindFirstChildOfClass("PlayerGui"):FindFirstChild("SpawnedItemsTracker")
+if oldGui then oldGui:Destroy() end
+
+-- Services
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+
+-- Target Folder
+local spawnedToolsFolder = Workspace:WaitForChild("SpawnedTools", 10)
+if not spawnedToolsFolder then
+    warn("SpawnedTools folder not found in Workspace!")
+    return
+end
+
+-- Create GUI Elements
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "SpawnedItemsTracker"
+ScreenGui.ResetOnSpawn = false
+
+-- Use CoreGui if executing via an exploit, otherwise fallback to PlayerGui
+local success, _ = pcall(function() ScreenGui.Parent = game:GetService("CoreGui") end)
+if not success then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+-- Main Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 250, 0, 350)
+MainFrame.Position = UDim2.new(0.05, 0, 0.3, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true -- Allows you to move the GUI around
+MainFrame.Parent = ScreenGui
+
+-- Corner styling
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = MainFrame
+
+-- Title
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 40)
+Title.BackgroundTransparency = 1
+Title.Text = "Spawned Items"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 18
+Title.Font = Enum.Font.SourceSansBold
+Title.Parent = MainFrame
+
+-- Scrolling Frame for Item List
+local ScrollingFrame = Instance.new("ScrollingFrame")
+ScrollingFrame.Size = UDim2.new(1, -20, 1, -50)
+ScrollingFrame.Position = UDim2.new(0, 10, 0, 40)
+ScrollingFrame.BackgroundTransparency = 1
+ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+ScrollingFrame.ScrollBarThickness = 6
+ScrollingFrame.Parent = MainFrame
+
+-- UI List Layout
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.Parent = ScrollingFrame
+UIListLayout.SortOrder = Enum.SortOrder.Name
+UIListLayout.Padding = UDim.new(0, 5)
+
+-- Auto-adjust scrolling canvas size
+UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y)
+end)
+
+-- Function to find the closest item of a specific name
+local function getClosestItem(itemName)
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return nil end
+    
+    local playerPos = character.HumanoidRootPart.Position
+    local closestItem = nil
+    local shortestDistance = math.huge
+    
+    for _, item in ipairs(spawnedToolsFolder:GetChildren()) do
+        if item.Name == itemName then
+            -- Handle both standard Tools (Handle) and Models/Parts
+            local itemPart = item:FindFirstChild("Handle") or item:FindFirstChildOfClass("Part") or item:FindFirstChildOfClass("MeshPart") or item
+            if itemPart:IsA("BasePart") then
+                local distance = (playerPos - itemPart.Position).Magnitude
+                if distance < shortestDistance then
+                    shortestDistance = distance
+                    closestItem = itemPart
+                end
+            end
+        end
+    end
+    return closestItem
+end
+
+-- Function to refresh the GUI item list
+local function refreshList()
+    -- Clear current buttons
+    for _, child in ipairs(ScrollingFrame:GetChildren()) do
+        if child:IsA("TextButton") then
+            child:Destroy()
+        end
+    end
+    
+    -- Count items
+    local itemCounts = {}
+    for _, item in ipairs(spawnedToolsFolder:GetChildren()) do
+        itemCounts[item.Name] = (itemCounts[item.Name] or 0) + 1
+    end
+    
+    -- Create buttons for each unique item
+    for itemName, count in pairs(itemCounts) do
+        local ItemButton = Instance.new("TextButton")
+        ItemButton.Size = UDim2.new(1, 0, 0, 30)
+        ItemButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+        ItemButton.BorderSizePixel = 0
+        
+        -- Display formatting: Name x[Count] if duplicates exist
+        if count > 1 then
+            ItemButton.Text = itemName .. " x[" .. tostring(count) .. "]"
+        else
+            ItemButton.Text = itemName
+        end
+        
+        ItemButton.TextColor3 = Color3.fromRGB(200, 200, 200)
+        ItemButton.TextSize = 14
+        ItemButton.Font = Enum.Font.SourceSans
+        ItemButton.Parent = ScrollingFrame
+        
+        local ButtonCorner = Instance.new("UICorner")
+        ButtonCorner.CornerRadius = UDim.new(0, 4)
+        ButtonCorner.Parent = ItemButton
+        
+        -- Teleport logic on click
+        ItemButton.MouseButton1Click:Connect(function()
+            local targetPart = getClosestItem(itemName)
+            if targetPart and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                -- Teleport slightly above the item to avoid clipping into the ground
+                LocalPlayer.Character.HumanoidRootPart.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
+            end
+        end)
+    end
+end
+
+-- Initial population
+refreshList()
+
+-- Automatically refresh when items are added or removed from the folder
+spawnedToolsFolder.ChildAdded:Connect(refreshList)
+spawnedToolsFolder.ChildRemoved:Connect(refreshList)
