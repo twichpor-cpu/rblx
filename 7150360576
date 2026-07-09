@@ -4,6 +4,7 @@ if oldGui then oldGui:Destroy() end
 
 -- Services
 local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
@@ -15,10 +16,21 @@ if not spawnedToolsFolder then
     return
 end
 
--- Variables for Collapse State
+-- Blacklist Filter Dictionary (Items here will be ignored)
+local itemBlacklist = {
+    ["Water"] = true,
+    ["Sprite Cranberry"] = true,
+    ["Mountain Dew"] = true,
+    ["Sprite"] = true,
+    ["Chirumiru"] = true, 
+}
+
+-- Variables for Sizing / Sorting States
 local isCollapsed = false
+local currentSortMode = "Count"
 local expandedHeight = 350
 local collapsedHeight = 40
+local minHeight = 120
 
 -- Create GUI Elements
 local ScreenGui = Instance.new("ScreenGui")
@@ -29,13 +41,13 @@ ScreenGui.ResetOnSpawn = false
 local success, _ = pcall(function() ScreenGui.Parent = game:GetService("CoreGui") end)
 if not success then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
--- Main Frame (Acts as the container)
+-- Main Frame
 local MainFrame = Instance.new("Frame")
 MainFrame.Size = UDim2.new(0, 280, 0, expandedHeight)
 MainFrame.Position = UDim2.new(0.05, 0, 0.3, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 MainFrame.BorderSizePixel = 0
-MainFrame.ClipsDescendants = true -- Crucial for the "rolling up" effect
+MainFrame.ClipsDescendants = true
 MainFrame.Active = true
 MainFrame.Draggable = true
 MainFrame.Parent = ScreenGui
@@ -44,9 +56,9 @@ local UICorner = Instance.new("UICorner")
 UICorner.CornerRadius = UDim.new(0, 8)
 UICorner.Parent = MainFrame
 
--- Top Bar / Title Label
+-- Title
 local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, 0, 0, collapsedHeight)
+Title.Size = UDim2.new(1, -120, 0, collapsedHeight)
 Title.BackgroundTransparency = 1
 Title.Text = "Spawned Items"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -56,21 +68,26 @@ Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Position = UDim2.new(0, 12, 0, 0)
 Title.Parent = MainFrame
 
--- Close Button (X)
+-- Close Button (Fixed sizing and position alignment to eliminate text-bleeding)
 local CloseButton = Instance.new("TextButton")
-CloseButton.Size = UDim2.new(0, 30, 0, 30)
-CloseButton.Position = UDim2.new(1, -35, 0, 5)
-CloseButton.BackgroundTransparency = 1
-CloseButton.Text = "✕"
-CloseButton.TextColor3 = Color3.fromRGB(180, 70, 70)
-CloseButton.TextSize = 16
+CloseButton.Size = UDim2.new(0, 24, 0, 24)
+CloseButton.Position = UDim2.new(1, -34, 0, 8) -- Centered vertically within the 40px top bar
+CloseButton.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+CloseButton.BorderSizePixel = 0
+CloseButton.Text = "X"
+CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseButton.TextSize = 13 -- Slightly optimized font size to fit neatly inside container bounding box
 CloseButton.Font = Enum.Font.SourceSansBold
 CloseButton.Parent = MainFrame
 
--- Collapse Button (▼ / ◀)
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 5)
+CloseCorner.Parent = CloseButton
+
+-- Collapse Button
 local CollapseButton = Instance.new("TextButton")
 CollapseButton.Size = UDim2.new(0, 30, 0, 30)
-CollapseButton.Position = UDim2.new(1, -65, 0, 5)
+CollapseButton.Position = UDim2.new(1, -66, 0, 5)
 CollapseButton.BackgroundTransparency = 1
 CollapseButton.Text = "▼"
 CollapseButton.TextColor3 = Color3.fromRGB(200, 200, 200)
@@ -78,9 +95,20 @@ CollapseButton.TextSize = 14
 CollapseButton.Font = Enum.Font.SourceSansBold
 CollapseButton.Parent = MainFrame
 
--- Scrolling Frame (Holds items)
+-- Change Sort Button
+local SortButton = Instance.new("TextButton")
+SortButton.Size = UDim2.new(0, 30, 0, 30)
+SortButton.Position = UDim2.new(1, -96, 0, 5)
+SortButton.BackgroundTransparency = 1
+SortButton.Text = "⇅"
+SortButton.TextColor3 = Color3.fromRGB(200, 200, 200)
+SortButton.TextSize = 16
+SortButton.Font = Enum.Font.SourceSansBold
+SortButton.Parent = MainFrame
+
+-- Scrolling Frame
 local ScrollingFrame = Instance.new("ScrollingFrame")
-ScrollingFrame.Size = UDim2.new(1, -20, 0, expandedHeight - 50)
+ScrollingFrame.Size = UDim2.new(1, -20, 1, -50)
 ScrollingFrame.Position = UDim2.new(0, 10, 0, collapsedHeight)
 ScrollingFrame.BackgroundTransparency = 1
 ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
@@ -89,33 +117,65 @@ ScrollingFrame.Parent = MainFrame
 
 local UIListLayout = Instance.new("UIListLayout")
 UIListLayout.Parent = ScrollingFrame
-UIListLayout.SortOrder = Enum.SortOrder.Name
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 UIListLayout.Padding = UDim.new(0, 5)
 
 UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y)
 end)
 
--- Window Control Mechanics
-CloseButton.MouseButton1Click:Connect(function()
-    ScreenGui:Destroy()
+-- Downward Resizing Handle Bar
+local ResizeHandle = Instance.new("Frame")
+ResizeHandle.Size = UDim2.new(1, 0, 0, 8)
+ResizeHandle.Position = UDim2.new(0, 0, 1, -8)
+ResizeHandle.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+ResizeHandle.BorderSizePixel = 0
+ResizeHandle.ZIndex = 5
+ResizeHandle.Parent = MainFrame
+
+local HandleCorner = Instance.new("UICorner")
+HandleCorner.CornerRadius = UDim.new(0, 8)
+HandleCorner.Parent = ResizeHandle
+
+-- Custom Resizing Engine Logic
+local isResizing = false
+local dragStartPos = nil
+local startHeight = nil
+
+ResizeHandle.InputBegan:Connect(function(input)
+    if not isCollapsed and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+        isResizing = true
+        MainFrame.Draggable = false
+        dragStartPos = input.Position.Y
+        startHeight = MainFrame.Size.Y.Offset
+    end
 end)
 
-CollapseButton.MouseButton1Click:Connect(function()
-    isCollapsed = not isCollapsed
-    
-    local targetHeight = isCollapsed and collapsedHeight or expandedHeight
-    local targetArrow = isCollapsed and "◀" or "▼"
-    
-    CollapseButton.Text = targetArrow
-    
-    -- Smoothly roll up/down using Tweens
-    local tweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-    local sizeTween = TweenService:Create(MainFrame, tweenInfo, {Size = UDim2.new(0, 280, 0, targetHeight)})
-    sizeTween:Play()
+UserInputService.InputChanged:Connect(function(input)
+    if isResizing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local deltaY = input.Position.Y - dragStartPos
+        local newHeight = math.max(minHeight, startHeight + deltaY)
+        
+        local screenY = ScreenGui.AbsoluteSize.Y
+        if (MainFrame.AbsolutePosition.Y + newHeight) > screenY then
+            newHeight = screenY - MainFrame.AbsolutePosition.Y
+        end
+        
+        expandedHeight = newHeight
+        MainFrame.Size = UDim2.new(0, 280, 0, newHeight)
+    end
 end)
 
--- Global Data Tracker setup
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if isResizing then
+            isResizing = false
+            MainFrame.Draggable = true
+        end
+    end
+end)
+
+-- Tracking Data
 local activeButtons = {}
 local lastTrackedPosition = Vector3.new(0, 0, 0)
 
@@ -128,9 +188,9 @@ local function getClosestItemData(itemName)
     local closestPart = nil
     
     for _, item in ipairs(spawnedToolsFolder:GetChildren()) do
-        if item.Name == itemName then
+        if item and item.Name and item.Name == itemName and not itemBlacklist[item.Name] then
             local itemPart = item:FindFirstChild("Handle") or item:FindFirstChildOfClass("Part") or item:FindFirstChildOfClass("MeshPart") or item
-            if itemPart:IsA("BasePart") then
+            if itemPart and itemPart:IsA("BasePart") then
                 local distance = (playerPos - itemPart.Position).Magnitude
                 if distance < shortestDistance then
                     shortestDistance = distance
@@ -142,6 +202,23 @@ local function getClosestItemData(itemName)
     return closestPart, shortestDistance
 end
 
+local function updateDistances()
+    local character = LocalPlayer.Character
+    if character and character:FindFirstChild("HumanoidRootPart") then
+        lastTrackedPosition = character.HumanoidRootPart.Position
+        for itemName, distanceLabel in pairs(activeButtons) do
+            if distanceLabel and distanceLabel.Parent then
+                local _, distance = getClosestItemData(itemName)
+                if distance and distance ~= math.huge then
+                    distanceLabel.Text = math.floor(distance) .. " studs"
+                else
+                    distanceLabel.Text = "--- studs"
+                end
+            end
+        end
+    end
+end
+
 local function refreshList()
     activeButtons = {}
     for _, child in ipairs(ScrollingFrame:GetChildren()) do
@@ -150,27 +227,47 @@ local function refreshList()
     
     local itemCounts = {}
     for _, item in ipairs(spawnedToolsFolder:GetChildren()) do
-        itemCounts[item.Name] = (itemCounts[item.Name] or 0) + 1
+        if item and item.Name and not itemBlacklist[item.Name] then
+            itemCounts[item.Name] = (itemCounts[item.Name] or 0) + 1
+        end
     end
     
+    local sortedItems = {}
     for itemName, count in pairs(itemCounts) do
+        table.insert(sortedItems, {Name = itemName, Count = count})
+    end
+    
+    if currentSortMode == "Count" then
+        table.sort(sortedItems, function(a, b)
+            return a.Count > b.Count
+        end)
+    elseif currentSortMode == "Alphabetical" then
+        table.sort(sortedItems, function(a, b)
+            return a.Name:lower() < b.Name:lower()
+        end)
+    end
+    
+    for index, data in ipairs(sortedItems) do
         local ItemButton = Instance.new("TextButton")
         ItemButton.Size = UDim2.new(1, 0, 0, 35)
         ItemButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
         ItemButton.BorderSizePixel = 0
         ItemButton.Text = ""
+        ItemButton.LayoutOrder = index
         ItemButton.Parent = ScrollingFrame
         
         local ButtonCorner = Instance.new("UICorner")
         ButtonCorner.CornerRadius = UDim.new(0, 4)
         ButtonCorner.Parent = ItemButton
         
+        local displayName = (data.Count > 1) and (data.Name .. " x" .. data.Count) or data.Name
+        
         local NameLabel = Instance.new("TextLabel")
         NameLabel.Size = UDim2.new(0.65, 0, 1, 0)
         NameLabel.Position = UDim2.new(0, 10, 0, 0)
         NameLabel.BackgroundTransparency = 1
         NameLabel.TextXAlignment = Enum.TextXAlignment.Left
-        NameLabel.Text = (count > 1) and (itemName .. " x[" .. count .. "]") or itemName
+        NameLabel.Text = displayName
         NameLabel.TextColor3 = Color3.fromRGB(225, 225, 225)
         NameLabel.Font = Enum.Font.SourceSansSemibold
         NameLabel.TextSize = 14
@@ -187,28 +284,58 @@ local function refreshList()
         DistanceLabel.TextSize = 13
         DistanceLabel.Parent = ItemButton
         
-        activeButtons[itemName] = DistanceLabel
+        activeButtons[data.Name] = DistanceLabel
         
         ItemButton.MouseButton1Click:Connect(function()
-            local targetPart, _ = getClosestItemData(itemName)
+            local targetPart, _ = getClosestItemData(data.Name)
             if targetPart and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
                 LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 3, 0))
-                lastTrackedPosition = Vector3.new(0,0,0) -- Force distance recalculation post-teleport
+                task.wait(0.05)
+                updateDistances()
             end
         end)
     end
+    updateDistances()
 end
+
+-- Sorting Toggler Activation
+SortButton.MouseButton1Click:Connect(function()
+    if currentSortMode == "Count" then
+        currentSortMode = "Alphabetical"
+        SortButton.TextColor3 = Color3.fromRGB(120, 200, 255)
+    else
+        currentSortMode = "Count"
+        SortButton.TextColor3 = Color3.fromRGB(200, 200, 200)
+    end
+    refreshList()
+end)
+
+-- Window Controls
+CloseButton.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+end)
+
+CollapseButton.MouseButton1Click:Connect(function()
+    isCollapsed = not isCollapsed
+    local targetHeight = isCollapsed and collapsedHeight or expandedHeight
+    CollapseButton.Text = isCollapsed and "◀" or "▼"
+    
+    ResizeHandle.Visible = not isCollapsed
+    SortButton.Visible = not isCollapsed
+    
+    TweenService:Create(MainFrame, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0, 280, 0, targetHeight)
+    }):Play()
+end)
 
 refreshList()
 spawnedToolsFolder.ChildAdded:Connect(refreshList)
 spawnedToolsFolder.ChildRemoved:Connect(refreshList)
 
--- Dynamic Distance Loop (Stays optimized even when rolled up)
+-- Dynamic Distance Loop
 task.spawn(function()
     while true do
         task.wait(0.5)
-        
-        -- Don't calculate or waste processing power if window is currently rolled up
         if not isCollapsed then
             local character = LocalPlayer.Character
             if character and character:FindFirstChild("HumanoidRootPart") then
@@ -216,17 +343,7 @@ task.spawn(function()
                 local deltaDistance = (currentPos - lastTrackedPosition).Magnitude
                 
                 if deltaDistance > 15 then
-                    lastTrackedPosition = currentPos
-                    for itemName, distanceLabel in pairs(activeButtons) do
-                        if distanceLabel and distanceLabel.Parent then
-                            local _, distance = getClosestItemData(itemName)
-                            if distance and distance ~= math.huge then
-                                distanceLabel.Text = math.floor(distance) .. " studs"
-                            else
-                                distanceLabel.Text = "--- studs"
-                            end
-                        end
-                    end
+                    updateDistances()
                 end
             end
         end
