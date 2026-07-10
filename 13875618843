@@ -20,20 +20,6 @@ if not itemSpawnsFolder then
     return
 end
 
--- Blacklist Filter Dictionary (Items here will be ignored)
-local itemBlacklist = {
-    ["Water"] = true,
-    ["Sprite Cranberry"] = true,
-    ["Mountain Dew"] = true,
-    ["Sprite"] = true,
-    ["Chirumiru"] = true,
-    ["Chocolate Milk"] = true,
-    ["Prime Energy"] = true,
-    ["Bloxy Cola"] = true,
-    ["Coca-Cola"] = true,
-    ["Monster Energy"] = true
-}
-
 -- Variables for Sizing / Sorting States
 local isCollapsed = false
 local currentSortMode = "Count"
@@ -233,7 +219,7 @@ local function getAllInstancesOfItem(itemName)
     local totalTools = getAllSpawnedTools()
     
     for _, item in ipairs(totalTools) do
-        if item and item.Name and item.Name == itemName and not itemBlacklist[item.Name] then
+        if item and item.Name and item.Name == itemName then
             local itemPart = item:FindFirstChild("Handle") or item:FindFirstChildOfClass("Part") or item:FindFirstChildOfClass("MeshPart") or item
             if itemPart and itemPart:IsA("BasePart") then
                 table.insert(items, {Part = itemPart, Dist = (playerPos - itemPart.Position).Magnitude})
@@ -286,7 +272,7 @@ local function refreshList()
     local totalTools = getAllSpawnedTools()
     
     for _, item in ipairs(totalTools) do
-        if item and item.Name and not itemBlacklist[item.Name] then
+        if item and item.Name then
             itemCounts[item.Name] = (itemCounts[item.Name] or 0) + 1
         end
     end
