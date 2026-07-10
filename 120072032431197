@@ -204,14 +204,11 @@ local function getAllInstancesOfItem(itemName)
     
     local items = {}
     for _, item in ipairs(vfxFolder:GetChildren()) do
-        if item and item.Name and item.Name == itemName then
+        -- CRITICAL ENFORCEMENT: Explicitly verify the instance is a Tool
+        if item and item:IsA("Tool") and item.Name == itemName then
             local itemPart = item:FindFirstChild("Handle") or item:FindFirstChildOfClass("BasePart") or item
-            if itemPart and (itemPart:IsA("BasePart") or itemPart:IsA("Model")) then
-                -- Setup anchor part configuration safely
-                local actualPart = itemPart:IsA("Model") and (itemPart.PrimaryPart or itemPart:FindFirstChildOfClass("BasePart")) or itemPart
-                if actualPart then
-                    table.insert(items, {Part = actualPart, Dist = (playerPos - actualPart.Position).Magnitude})
-                end
+            if itemPart and itemPart:IsA("BasePart") then
+                table.insert(items, {Part = itemPart, Dist = (playerPos - itemPart.Position).Magnitude})
             end
         end
     end
@@ -259,7 +256,8 @@ local function refreshList()
     
     local itemCounts = {}
     for _, item in ipairs(vfxFolder:GetChildren()) do
-        if item and item.Name then
+        -- CRITICAL ENFORCEMENT: Only increments counts if the object is a Tool
+        if item and item:IsA("Tool") and item.Name then
             itemCounts[item.Name] = (itemCounts[item.Name] or 0) + 1
         end
     end
@@ -406,16 +404,23 @@ end)
 
 refreshList()
 
--- Flat Folder Event Connections (Much faster performance for workspace.Vfx)
-vfxFolder.ChildAdded:Connect(refreshList)
-vfxFolder.ChildRemoved:Connect(function(item)
-    if currentlyViewedItem and item and item.Name == currentlyViewedItem then
-        local currentSubject = Camera.CameraSubject
-        if currentSubject == nil or currentSubject.Parent == item or currentSubject == item then
-            resetCameraToPlayer()
-        end
+-- Flat Folder Event Connections (Filters via ChildAdded/ChildRemoved)
+vfxFolder.ChildAdded:Connect(function(item)
+    if item:IsA("Tool") then
+        refreshList()
     end
-    refreshList()
+end)
+
+vfxFolder.ChildRemoved:Connect(function(item)
+    if item:IsA("Tool") then
+        if currentlyViewedItem and item.Name == currentlyViewedItem then
+            local currentSubject = Camera.CameraSubject
+            if currentSubject == nil or currentSubject.Parent == item or currentSubject == item then
+                resetCameraToPlayer()
+            end
+        end
+        refreshList()
+    end
 end)
 
 -- Dynamic Distance Loop
