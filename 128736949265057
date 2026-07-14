@@ -1,0 +1,420 @@
+--[[
+    Roblox Executable Script with Autoplay Bot Integration
+    ----------------------------------------------------------------
+    Features:
+    - Auto-detects notes ("NoteTemplate") and matches them to Receptors (1-4 / X, C, N, M)
+    - Multi-note / Chord support (can hit multiple notes at the exact same time)
+    - Object Recycling (Pooling) Support: Detects when notes are reset to the top and clears cache
+    - Static Template Filtering: Automatically ignores hidden/inactive source templates
+    - Dynamic Hold & Tap Support with overlapping hold safeguards
+    - Safe-release safeguards to prevent stuck keys on toggle/close
+    - High-precision coordinate detection using AbsolutePosition
+    - Automated key presses via VirtualInputManager
+    - Includes an On/Off Toggle and a Safe Close clean-up sequence
+    - Draggable GUI Frame
+--]]
+
+-- Services
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+-- Variables
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- Determine where to parent the GUI (CoreGui for exploits/admin, PlayerGui for Studio play-testing)
+local TargetParent = nil
+local success, _ = pcall(function()
+    local test = CoreGui.Name
+    TargetParent = CoreGui
+end)
+if not success or not TargetParent then
+    TargetParent = PlayerGui
+end
+
+-- Clean up any existing instances of this script's GUI to prevent duplicates
+local existingGui = TargetParent:FindFirstChild("RobloxProcessManager")
+if existingGui then
+    existingGui:Destroy()
+end
+
+-- State Management & Key Configurations
+local isProcessActive = false
+local processConnection = nil -- Stores our background loop connection
+local uiConnections = {}      -- Holds UI connections for safe garbage collection
+local playedNotes = {}        -- Keeps track of finished notes to prevent double-tapping
+local activeHolds = {}        -- Keeps track of keys currently held down { [noteInstance] = { keyCode = Enum.KeyCode, keyIndex = number } }
+
+local KEY_MAPPINGS = {
+    [1] = Enum.KeyCode.X,
+    [2] = Enum.KeyCode.C,
+    [3] = Enum.KeyCode.N,
+    [4] = Enum.KeyCode.M
+}
+
+-- Configurable thresholds (Adjusted to calibrate fast-moving notes and hold elements)
+local HIT_THRESHOLD_PX = 25       -- Note center distance to receptor center to trigger a press
+local RELEASE_THRESHOLD_PX = 60   -- Distance past receptor before forcing a release (if note doesn't disappear)
+
+-- -------------------------------------------------------------
+-- UI CREATION
+-- -------------------------------------------------------------
+
+-- Main ScreenGui
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "RobloxProcessManager"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+-- Main Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 300, 0, 180)
+MainFrame.Position = UDim2.new(0.5, -150, 0.4, -90)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MainFrame.BorderSizePixel = 0
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 8)
+MainCorner.Parent = MainFrame
+
+-- Top Title Bar
+local TitleBar = Instance.new("Frame")
+TitleBar.Name = "TitleBar"
+TitleBar.Size = UDim2.new(1, 0, 0, 40)
+TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = MainFrame
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 8)
+TitleCorner.Parent = TitleBar
+
+-- Title Text
+local TitleText = Instance.new("TextLabel")
+TitleText.Name = "TitleText"
+TitleText.Size = UDim2.new(1, -50, 1, 0)
+TitleText.Position = UDim2.new(0, 15, 0, 0)
+TitleText.BackgroundTransparency = 1
+TitleText.Font = Enum.Font.GothamBold
+TitleText.Text = "RHYTHM AUTOPLAY BOT"
+TitleText.TextColor3 = Color3.fromRGB(240, 240, 240)
+TitleText.TextSize = 14
+TitleText.TextXAlignment = Enum.TextXAlignment.Left
+TitleText.Parent = TitleBar
+
+-- Close Button
+local CloseButton = Instance.new("TextButton")
+CloseButton.Name = "CloseButton"
+CloseButton.Size = UDim2.new(0, 30, 0, 30)
+CloseButton.Position = UDim2.new(1, -35, 0.5, -15)
+CloseButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+CloseButton.Text = "X"
+CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseButton.Font = Enum.Font.GothamBold
+CloseButton.TextSize = 14
+CloseButton.AutoButtonColor = true
+CloseButton.Parent = TitleBar
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 6)
+CloseCorner.Parent = CloseButton
+
+-- Toggle Button
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Name = "ToggleButton"
+ToggleButton.Size = UDim2.new(0, 240, 0, 45)
+ToggleButton.Position = UDim2.new(0.5, -120, 0.5, -10)
+ToggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50) -- Default Red (OFF)
+ToggleButton.Text = "AUTOPLAY: OFF"
+ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleButton.Font = Enum.Font.GothamBold
+ToggleButton.TextSize = 14
+ToggleButton.AutoButtonColor = true
+ToggleButton.Parent = MainFrame
+
+local ToggleCorner = Instance.new("UICorner")
+ToggleCorner.CornerRadius = UDim.new(0, 6)
+ToggleCorner.Parent = ToggleButton
+
+-- Status Label
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Name = "StatusLabel"
+StatusLabel.Size = UDim2.new(1, 0, 0, 25)
+StatusLabel.Position = UDim2.new(0, 0, 1, -35)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Font = Enum.Font.Gotham
+StatusLabel.Text = "Bot Idle - Awaiting Activation"
+StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+StatusLabel.TextSize = 12
+StatusLabel.Parent = MainFrame
+
+-- Parent the GUI to display it
+ScreenGui.Parent = TargetParent
+
+-- -------------------------------------------------------------
+-- DRAGGABLE SCRIPT FUNCTIONALITY
+-- -------------------------------------------------------------
+local dragging
+local dragInput
+local dragStart
+local startPos
+
+local function update(input)
+    local delta = input.Position - dragStart
+    MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+
+table.insert(uiConnections, TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end))
+
+table.insert(uiConnections, TitleBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end))
+
+table.insert(uiConnections, UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        update(input)
+    end
+end))
+
+-- -------------------------------------------------------------
+-- BOT CORE AUTOPLAY LOGIC
+-- -------------------------------------------------------------
+
+-- Simulates keyboard key state securely
+local function setKeyPressState(keyCode, isPressed)
+    VirtualInputManager:SendKeyEvent(isPressed, keyCode, false, game)
+end
+
+-- Safely search for active path objects
+local function getRhythmGameElements()
+    local rhythmUI = PlayerGui:FindFirstChild("RhythmServiceUI")
+    if not rhythmUI then return nil, nil end
+    
+    local root = rhythmUI:FindFirstChild("RhythmRoot")
+    if not root then return nil, nil end
+    
+    local receptors = root:FindFirstChild("Receptors")
+    local lanes = root:FindFirstChild("Lanes")
+    
+    return receptors, lanes
+end
+
+-- Matches notes to the nearest receptor horizontally
+local function getAssociatedReceptor(note, receptors)
+    local noteX = note.AbsolutePosition.X + (note.AbsoluteSize.X / 2)
+    local closestReceptor = nil
+    local minDistance = math.huge
+    local matchedIndex = 1
+    
+    for i = 1, 4 do
+        local receptor = receptors:FindFirstChild("Receptor" .. i)
+        if receptor then
+            local receptorX = receptor.AbsolutePosition.X + (receptor.AbsoluteSize.X / 2)
+            local dist = math.abs(noteX - receptorX)
+            if dist < minDistance then
+                minDistance = dist
+                closestReceptor = receptor
+                matchedIndex = i
+            end
+        end
+    end
+    
+    -- Ensure the note is actually aligned with a lane
+    if minDistance < 60 then
+        return closestReceptor, matchedIndex
+    end
+    return nil, nil
+end
+
+-- Main Autoplay Thread
+local function startProcessLoop()
+    if processConnection then processConnection:Disconnect() end
+    table.clear(playedNotes)
+    table.clear(activeHolds)
+    
+    processConnection = RunService.Heartbeat:Connect(function()
+        if not isProcessActive then return end
+        
+        local receptors, lanes = getRhythmGameElements()
+        if not receptors or not lanes then
+            StatusLabel.Text = "Waiting for Game UI components..."
+            return
+        end
+        
+        -- 1. Handle Active Key Holds (Release when note is gone, passed, or recycled)
+        for noteInstance, holdData in pairs(activeHolds) do
+            local shouldRelease = false
+            
+            if not noteInstance:IsDescendantOf(game) then
+                shouldRelease = true
+            else
+                local targetNode = noteInstance:FindFirstChild("Head") or noteInstance
+                local receptor = receptors:FindFirstChild("Receptor" .. holdData.keyIndex)
+                
+                if targetNode:IsA("GuiObject") and receptor then
+                    local noteY = targetNode.AbsolutePosition.Y + (targetNode.AbsoluteSize.Y / 2)
+                    local receptorY = receptor.AbsolutePosition.Y + (receptor.AbsoluteSize.Y / 2)
+                    
+                    -- Release if note passed the release boundary
+                    if (noteY - receptorY) > RELEASE_THRESHOLD_PX then
+                        shouldRelease = true
+                    -- Release if note got recycled back to the top of the lane
+                    elseif noteY < (receptorY - 100) then
+                        shouldRelease = true
+                    -- Release if the note was hidden/made invisible
+                    elseif not targetNode.Visible then
+                        shouldRelease = true
+                    end
+                else
+                    shouldRelease = true
+                end
+            end
+            
+            if shouldRelease then
+                activeHolds[noteInstance] = nil
+                playedNotes[noteInstance] = true -- Mark note as completed
+                
+                -- Chord / Simultaneous Note Safeguard:
+                -- Only physically release the key if NO OTHER active note is still holding it down
+                local keyStillNeeded = false
+                for _, otherHold in pairs(activeHolds) do
+                    if otherHold.keyCode == holdData.keyCode then
+                        keyStillNeeded = true
+                        break
+                    end
+                end
+                
+                if not keyStillNeeded then
+                    setKeyPressState(holdData.keyCode, false) -- RELEASE KEY
+                end
+                
+                StatusLabel.Text = "Released: " .. holdData.keyCode.Name
+            end
+        end
+        
+        -- Clean up/Recycle playedNotes cache
+        for noteInstance, _ in pairs(playedNotes) do
+            if not noteInstance:IsDescendantOf(game) then
+                playedNotes[noteInstance] = nil
+            else
+                local targetNode = noteInstance:FindFirstChild("Head") or noteInstance
+                if targetNode:IsA("GuiObject") then
+                    local receptor, keyIndex = getAssociatedReceptor(targetNode, receptors)
+                    if receptor then
+                        local noteY = targetNode.AbsolutePosition.Y + (targetNode.AbsoluteSize.Y / 2)
+                        local receptorY = receptor.AbsolutePosition.Y + (receptor.AbsoluteSize.Y / 2)
+                        
+                        -- Object Recycling Check: If a "played" note is teleported back to the top,
+                        -- remove it from playedNotes so it can be hit again!
+                        if noteY < (receptorY - 100) then
+                            playedNotes[noteInstance] = nil
+                        end
+                    end
+                else
+                    playedNotes[noteInstance] = nil
+                end
+            end
+        end
+        
+        -- 2. Scan and Process Active Notes
+        local descendants = lanes:GetDescendants()
+        for _, obj in ipairs(descendants) do
+            if obj.Name == "NoteTemplate" and not playedNotes[obj] and not activeHolds[obj] then
+                local targetNode = obj:FindFirstChild("Head") or obj
+                
+                -- Static Template & Visibility Filter:
+                -- Skip nodes that are hidden (.Visible = false) or have no size (often used for source templates)
+                if targetNode:IsA("GuiObject") and targetNode.Visible and targetNode.AbsoluteSize.Y > 1 then
+                    local receptor, keyIndex = getAssociatedReceptor(targetNode, receptors)
+                    
+                    if receptor then
+                        local noteY = targetNode.AbsolutePosition.Y + (targetNode.AbsoluteSize.Y / 2)
+                        local receptorY = receptor.AbsolutePosition.Y + (receptor.AbsoluteSize.Y / 2)
+                        
+                        local distance = math.abs(noteY - receptorY)
+                        
+                        -- Trigger hold / press when it reaches the hit-zone
+                        if distance <= HIT_THRESHOLD_PX then
+                            local keyToPress = KEY_MAPPINGS[keyIndex]
+                            
+                            if keyToPress then
+                                setKeyPressState(keyToPress, true) -- HOLD KEY DOWN
+                                activeHolds[obj] = { keyCode = keyToPress, keyIndex = keyIndex }
+                                StatusLabel.Text = "Auto hit: " .. keyToPress.Name
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function stopProcessLoop()
+    if processConnection then
+        processConnection:Disconnect()
+        processConnection = nil
+    end
+    
+    -- Safety cleanup: Release any keys that are currently being simulated down
+    for _, holdData in pairs(activeHolds) do
+        pcall(function()
+            setKeyPressState(holdData.keyCode, false)
+        end)
+    end
+    
+    table.clear(activeHolds)
+    table.clear(playedNotes)
+    StatusLabel.Text = "Bot Idle - Awaiting Activation"
+end
+
+-- Toggle click listener
+table.insert(uiConnections, ToggleButton.MouseButton1Click:Connect(function()
+    isProcessActive = not isProcessActive
+    
+    if isProcessActive then
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(50, 180, 50) -- Green
+        ToggleButton.Text = "AUTOPLAY: ON"
+        startProcessLoop()
+    else
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50) -- Red
+        ToggleButton.Text = "AUTOPLAY: OFF"
+        stopProcessLoop()
+    end
+end))
+
+-- Close click listener (Deactivates loops, removes connections, destroys UI)
+table.insert(uiConnections, CloseButton.MouseButton1Click:Connect(function()
+    isProcessActive = false
+    stopProcessLoop()
+    
+    -- Disconnect UI Event listeners to prevent memory leaks
+    for _, connection in ipairs(uiConnections) do
+        if connection then
+            connection:Disconnect()
+        end
+    end
+    table.clear(uiConnections)
+    
+    -- Destroy GUI Element
+    ScreenGui:Destroy()
+end))
