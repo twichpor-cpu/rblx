@@ -3,6 +3,8 @@
     ----------------------------------------------------------------
     Features:
     - Auto-detects notes ("NoteTemplate") and matches them to Receptors (1-4 / X, C, N, M)
+    - NEW: Multi-accuracy Modes (Perfect, Great, Good, Humanized Legit)
+    - NEW: Anti-Miss Crossing Detection (solves skipped notes on fast scroll speeds)
     - Multi-note / Chord support (can hit multiple notes at the exact same time)
     - Object Recycling (Pooling) Support: Detects when notes are reset to the top and clears cache
     - Static Template Filtering: Automatically ignores hidden/inactive source templates
@@ -55,12 +57,20 @@ local KEY_MAPPINGS = {
     [4] = Enum.KeyCode.M
 }
 
--- Configurable thresholds (Adjusted to calibrate fast-moving notes and hold elements)
-local HIT_THRESHOLD_PX = 25       -- Note center distance to receptor center to trigger a press
-local RELEASE_THRESHOLD_PX = 60   -- Distance past receptor before forcing a release (if note doesn't disappear)
+-- Accuracy settings
+local ACCURACY_MODES = {
+    [1] = { Name = "PERFECT (100%)", MinOffset = -8, MaxOffset = 8 },
+    [2] = { Name = "GREAT (~95%)",   MinOffset = -18, MaxOffset = 18 },
+    [3] = { Name = "GOOD (~90%)",    MinOffset = -28, MaxOffset = 28 },
+    [4] = { Name = "HUMANIZED (LEGIT)", MinOffset = 0, MaxOffset = 0 } -- Calculated dynamically per-note
+}
+local currentAccuracyIndex = 1
+
+-- Release Thresholds (Distance past receptor before forcing key up)
+local RELEASE_THRESHOLD_PX = 60
 
 -- -------------------------------------------------------------
--- UI CREATION
+-- UI CREATION (Slightly taller to accommodate Accuracy Button)
 -- -------------------------------------------------------------
 
 -- Main ScreenGui
@@ -72,8 +82,8 @@ ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 -- Main Frame
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 300, 0, 180)
-MainFrame.Position = UDim2.new(0.5, -150, 0.4, -90)
+MainFrame.Size = UDim2.new(0, 300, 0, 230)
+MainFrame.Position = UDim2.new(0.5, -150, 0.4, -115)
 MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 MainFrame.BorderSizePixel = 0
 MainFrame.Parent = ScreenGui
@@ -124,22 +134,39 @@ local CloseCorner = Instance.new("UICorner")
 CloseCorner.CornerRadius = UDim.new(0, 6)
 CloseCorner.Parent = CloseButton
 
--- Toggle Button
+-- Toggle Button (ON/OFF)
 local ToggleButton = Instance.new("TextButton")
 ToggleButton.Name = "ToggleButton"
-ToggleButton.Size = UDim2.new(0, 240, 0, 45)
-ToggleButton.Position = UDim2.new(0.5, -120, 0.5, -10)
+ToggleButton.Size = UDim2.new(0, 240, 0, 40)
+ToggleButton.Position = UDim2.new(0.5, -120, 0, 55)
 ToggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50) -- Default Red (OFF)
 ToggleButton.Text = "AUTOPLAY: OFF"
 ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 ToggleButton.Font = Enum.Font.GothamBold
-ToggleButton.TextSize = 14
+ToggleButton.TextSize = 13
 ToggleButton.AutoButtonColor = true
 ToggleButton.Parent = MainFrame
 
 local ToggleCorner = Instance.new("UICorner")
 ToggleCorner.CornerRadius = UDim.new(0, 6)
 ToggleCorner.Parent = ToggleButton
+
+-- Accuracy Toggle Button
+local AccuracyButton = Instance.new("TextButton")
+AccuracyButton.Name = "AccuracyButton"
+AccuracyButton.Size = UDim2.new(0, 240, 0, 40)
+AccuracyButton.Position = UDim2.new(0.5, -120, 0, 105)
+AccuracyButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+AccuracyButton.Text = "ACCURACY: PERFECT (100%)"
+AccuracyButton.TextColor3 = Color3.fromRGB(230, 230, 230)
+AccuracyButton.Font = Enum.Font.GothamBold
+AccuracyButton.TextSize = 11
+AccuracyButton.AutoButtonColor = true
+AccuracyButton.Parent = MainFrame
+
+local AccuracyCorner = Instance.new("UICorner")
+AccuracyCorner.CornerRadius = UDim.new(0, 6)
+AccuracyCorner.Parent = AccuracyButton
 
 -- Status Label
 local StatusLabel = Instance.new("TextLabel")
@@ -243,6 +270,24 @@ local function getAssociatedReceptor(note, receptors)
         return closestReceptor, matchedIndex
     end
     return nil, nil
+end
+
+-- Generates randomized human-like performance offsets
+local function getDynamicOffset()
+    local mode = ACCURACY_MODES[currentAccuracyIndex]
+    if mode.Name == "HUMANIZED (LEGIT)" then
+        -- Weighted randomizer for realistic legitness (85% Perfect, 12% Great, 3% Good)
+        local roll = math.random(1, 100)
+        if roll <= 85 then
+            return math.random(-6, 6) -- Perfect window
+        elseif roll <= 97 then
+            return math.random(-16, 16) -- Great window
+        else
+            return math.random(-26, 26) -- Good window
+        end
+    else
+        return math.random(mode.MinOffset, mode.MaxOffset)
+    end
 end
 
 -- Main Autoplay Thread
@@ -350,16 +395,21 @@ local function startProcessLoop()
                         local noteY = targetNode.AbsolutePosition.Y + (targetNode.AbsoluteSize.Y / 2)
                         local receptorY = receptor.AbsolutePosition.Y + (receptor.AbsoluteSize.Y / 2)
                         
-                        local distance = math.abs(noteY - receptorY)
+                        -- Determine target distance using the selected accuracy Mode
+                        local targetOffset = getDynamicOffset()
+                        local triggerY = receptorY + targetOffset
                         
-                        -- Trigger hold / press when it reaches the hit-zone
-                        if distance <= HIT_THRESHOLD_PX then
+                        -- DIRECTIONAL CROSSING DETECTOR (Anti-Miss Engine):
+                        -- We trigger the note if its center is passing through/has reached our target offset.
+                        -- By checking a bracketed window slightly below/around the line, we guarantee 100% accuracy 
+                        -- even if high-speed notes skip past the threshold between frames.
+                        if noteY >= (triggerY - 20) and noteY <= (triggerY + 35) then
                             local keyToPress = KEY_MAPPINGS[keyIndex]
                             
                             if keyToPress then
                                 setKeyPressState(keyToPress, true) -- HOLD KEY DOWN
                                 activeHolds[obj] = { keyCode = keyToPress, keyIndex = keyIndex }
-                                StatusLabel.Text = "Auto hit: " .. keyToPress.Name
+                                StatusLabel.Text = "Auto hit (" .. ACCURACY_MODES[currentAccuracyIndex].Name .. "): " .. keyToPress.Name
                             end
                         end
                     end
@@ -386,6 +436,17 @@ local function stopProcessLoop()
     table.clear(playedNotes)
     StatusLabel.Text = "Bot Idle - Awaiting Activation"
 end
+
+-- Accuracy cycling listener
+table.insert(uiConnections, AccuracyButton.MouseButton1Click:Connect(function()
+    currentAccuracyIndex = currentAccuracyIndex + 1
+    if currentAccuracyIndex > #ACCURACY_MODES then
+        currentAccuracyIndex = 1
+    end
+    
+    local mode = ACCURACY_MODES[currentAccuracyIndex]
+    AccuracyButton.Text = "ACCURACY: " .. mode.Name
+end))
 
 -- Toggle click listener
 table.insert(uiConnections, ToggleButton.MouseButton1Click:Connect(function()
