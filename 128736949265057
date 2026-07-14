@@ -3,8 +3,12 @@
     ----------------------------------------------------------------
     Features:
     - Auto-detects notes ("NoteTemplate") and matches them to Receptors (1-4 / X, C, N, M)
-    - NEW: Multi-accuracy Modes (Perfect, Great, Good, Humanized Legit)
-    - NEW: Anti-Miss Crossing Detection (solves skipped notes on fast scroll speeds)
+    - FIXED: Resolves early release on Hold Notes when the game hides the "Head" on hit
+    - NEW: Dual Tap vs Hold state engines (crisp 50ms taps vs sustained hold trails)
+    - NEW: Dynamic Trailing-Edge Detection for hold/sustain notes (prevents early releases on short hold notes)
+    - NEW: Auto-Scroll-Direction calibration (fully supports both Upscroll and Downscroll layouts)
+    - Multi-accuracy Modes (Perfect, Great, Good, Humanized Legit)
+    - Anti-Miss Crossing Detection (solves skipped notes on fast scroll speeds)
     - Multi-note / Chord support (can hit multiple notes at the exact same time)
     - Object Recycling (Pooling) Support: Detects when notes are reset to the top and clears cache
     - Static Template Filtering: Automatically ignores hidden/inactive source templates
@@ -48,7 +52,7 @@ local isProcessActive = false
 local processConnection = nil -- Stores our background loop connection
 local uiConnections = {}      -- Holds UI connections for safe garbage collection
 local playedNotes = {}        -- Keeps track of finished notes to prevent double-tapping
-local activeHolds = {}        -- Keeps track of keys currently held down { [noteInstance] = { keyCode = Enum.KeyCode, keyIndex = number } }
+local activeHolds = {}        -- Keeps track of keys currently held down { [noteInstance] = { keyCode = Enum.KeyCode, keyIndex = number, isHold = boolean, pressTime = number } }
 
 local KEY_MAPPINGS = {
     [1] = Enum.KeyCode.X,
@@ -66,11 +70,8 @@ local ACCURACY_MODES = {
 }
 local currentAccuracyIndex = 1
 
--- Release Thresholds (Distance past receptor before forcing key up)
-local RELEASE_THRESHOLD_PX = 60
-
 -- -------------------------------------------------------------
--- UI CREATION (Slightly taller to accommodate Accuracy Button)
+-- UI CREATION
 -- -------------------------------------------------------------
 
 -- Main ScreenGui
@@ -245,6 +246,59 @@ local function getRhythmGameElements()
     return receptors, lanes
 end
 
+-- Detects scroll direction dynamically based on receptor Y-levels
+local function getScrollDirection(receptor)
+    local screenHeight = 1080 -- Fallback baseline
+    local rhythmUI = PlayerGui:FindFirstChild("RhythmServiceUI")
+    if rhythmUI and rhythmUI:IsA("GuiObject") then
+        screenHeight = rhythmUI.AbsoluteSize.Y
+    end
+    
+    -- If receptors are placed in the upper part of the game UI, it's Upscroll (notes go UP)
+    if receptor.AbsolutePosition.Y < (screenHeight * 0.45) then
+        return "Up"
+    else
+        return "Down"
+    end
+end
+
+-- Calculates the trailing-edge of hold/sustain notes to allow full durations
+local function getNoteTrailingEdgeY(note, scrollDirection)
+    local trailingY = nil
+    local parts = {note}
+    
+    -- Scan and incorporate nested elements (such as Sustain/Tail/Hold UI bars)
+    -- Excludes "Head" because the game often hides or moves it upon being hit
+    pcall(function()
+        for _, child in ipairs(note:GetDescendants()) do
+            if child:IsA("GuiObject") and child.Visible and child.Name ~= "Head" then
+                table.insert(parts, child)
+            end
+        end
+    end)
+    
+    for _, part in ipairs(parts) do
+        local partY = part.AbsolutePosition.Y
+        local partHeight = part.AbsoluteSize.Y
+        
+        if scrollDirection == "Up" then
+            -- Upscroll: note travels UP. The trailing part of the note is at the bottom (largest Y coord)
+            local bottomY = partY + partHeight
+            if not trailingY or bottomY > trailingY then
+                trailingY = bottomY
+            end
+        else
+            -- Downscroll: note travels DOWN. The trailing part of the note is at the top (smallest Y coord)
+            local topY = partY
+            if not trailingY or topY < trailingY then
+                trailingY = topY
+            end
+        end
+    end
+    
+    return trailingY
+end
+
 -- Matches notes to the nearest receptor horizontally
 local function getAssociatedReceptor(note, receptors)
     local noteX = note.AbsolutePosition.X + (note.AbsoluteSize.X / 2)
@@ -305,7 +359,7 @@ local function startProcessLoop()
             return
         end
         
-        -- 1. Handle Active Key Holds (Release when note is gone, passed, or recycled)
+        -- 1. Handle Active Key Holds (Release when note trailing edge clears the receptor)
         for noteInstance, holdData in pairs(activeHolds) do
             local shouldRelease = false
             
@@ -315,18 +369,50 @@ local function startProcessLoop()
                 local targetNode = noteInstance:FindFirstChild("Head") or noteInstance
                 local receptor = receptors:FindFirstChild("Receptor" .. holdData.keyIndex)
                 
-                if targetNode:IsA("GuiObject") and receptor then
-                    local noteY = targetNode.AbsolutePosition.Y + (targetNode.AbsoluteSize.Y / 2)
+                if receptor then
                     local receptorY = receptor.AbsolutePosition.Y + (receptor.AbsoluteSize.Y / 2)
+                    local scrollDirection = getScrollDirection(receptor)
                     
-                    -- Release if note passed the release boundary
-                    if (noteY - receptorY) > RELEASE_THRESHOLD_PX then
-                        shouldRelease = true
-                    -- Release if note got recycled back to the top of the lane
-                    elseif noteY < (receptorY - 100) then
-                        shouldRelease = true
-                    -- Release if the note was hidden/made invisible
-                    elseif not targetNode.Visible then
+                    if not holdData.isHold then
+                        -- For standard tap notes, release after a crisp, reliable duration (e.g., 50ms)
+                        if (os.clock() - holdData.pressTime) >= 0.05 then
+                            shouldRelease = true
+                        end
+                    else
+                        -- For hold notes, monitor the trailing edge of the sliding container
+                        local trailingY = getNoteTrailingEdgeY(noteInstance, scrollDirection)
+                        if trailingY then
+                            -- Check trailing-edge crossing criteria
+                            if scrollDirection == "Up" then
+                                -- Upscroll: note moves UP (Y decreasing). Release when trailing edge (bottom) clears the receptor line
+                                if trailingY < (receptorY - 10) then
+                                    shouldRelease = true
+                                end
+                            else
+                                -- Downscroll: note moves DOWN (Y increasing). Release when trailing edge (top) clears the receptor line
+                                if trailingY > (receptorY + 10) then
+                                    shouldRelease = true
+                                end
+                            end
+                        else
+                            shouldRelease = true
+                        end
+                    end
+                    
+                    -- Object Recycling Safeguard
+                    local currentY = targetNode.AbsolutePosition.Y + (targetNode.AbsoluteSize.Y / 2)
+                    if scrollDirection == "Up" then
+                        if currentY > (receptorY + 100) then
+                            shouldRelease = true
+                        end
+                    else
+                        if currentY < (receptorY - 100) then
+                            shouldRelease = true
+                        end
+                    end
+                    
+                    -- Release if the main note container itself was hidden/made invisible by the engine
+                    if not noteInstance.Visible then
                         shouldRelease = true
                     end
                 else
@@ -365,13 +451,20 @@ local function startProcessLoop()
                 if targetNode:IsA("GuiObject") then
                     local receptor, keyIndex = getAssociatedReceptor(targetNode, receptors)
                     if receptor then
-                        local noteY = targetNode.AbsolutePosition.Y + (targetNode.AbsoluteSize.Y / 2)
                         local receptorY = receptor.AbsolutePosition.Y + (receptor.AbsoluteSize.Y / 2)
+                        local currentY = targetNode.AbsolutePosition.Y + (targetNode.AbsoluteSize.Y / 2)
+                        local scrollDirection = getScrollDirection(receptor)
                         
                         -- Object Recycling Check: If a "played" note is teleported back to the top,
                         -- remove it from playedNotes so it can be hit again!
-                        if noteY < (receptorY - 100) then
-                            playedNotes[noteInstance] = nil
+                        if scrollDirection == "Up" then
+                            if currentY > (receptorY + 100) then
+                                playedNotes[noteInstance] = nil
+                            end
+                        else
+                            if currentY < (receptorY - 100) then
+                                playedNotes[noteInstance] = nil
+                            end
                         end
                     end
                 else
@@ -401,15 +494,31 @@ local function startProcessLoop()
                         
                         -- DIRECTIONAL CROSSING DETECTOR (Anti-Miss Engine):
                         -- We trigger the note if its center is passing through/has reached our target offset.
-                        -- By checking a bracketed window slightly below/around the line, we guarantee 100% accuracy 
-                        -- even if high-speed notes skip past the threshold between frames.
                         if noteY >= (triggerY - 20) and noteY <= (triggerY + 35) then
                             local keyToPress = KEY_MAPPINGS[keyIndex]
                             
                             if keyToPress then
+                                -- Determine if this is a Hold Note (either container size or active descendants)
+                                local isHold = false
+                                if obj.AbsoluteSize.Y > 65 then
+                                    isHold = true
+                                else
+                                    for _, child in ipairs(obj:GetDescendants()) do
+                                        if child:IsA("GuiObject") and child.Visible and child.Name ~= "Head" and child.AbsoluteSize.Y > 15 then
+                                            isHold = true
+                                            break
+                                        end
+                                    end
+                                end
+                                
                                 setKeyPressState(keyToPress, true) -- HOLD KEY DOWN
-                                activeHolds[obj] = { keyCode = keyToPress, keyIndex = keyIndex }
-                                StatusLabel.Text = "Auto hit (" .. ACCURACY_MODES[currentAccuracyIndex].Name .. "): " .. keyToPress.Name
+                                activeHolds[obj] = { 
+                                    keyCode = keyToPress, 
+                                    keyIndex = keyIndex,
+                                    isHold = isHold,
+                                    pressTime = os.clock()
+                                }
+                                StatusLabel.Text = "Auto hit (" .. (isHold and "Hold" or "Tap") .. "): " .. keyToPress.Name
                             end
                         end
                     end
