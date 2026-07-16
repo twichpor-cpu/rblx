@@ -1,23 +1,15 @@
 --[[
-    Roblox Executable Script with Autoplay Bot Integration
+    RHYTHM AUTOPLAY BOT - DYNAMIC RECEPTOR & KEYBIND ENGINE
     ----------------------------------------------------------------
     Features:
-    - Auto-detects notes ("NoteTemplate") and matches them to Receptors (1-4 / X, C, N, M)
-    - FIXED: Resolves early release on Hold Notes when the game hides the "Head" on hit
-    - NEW: Dual Tap vs Hold state engines (crisp 50ms taps vs sustained hold trails)
-    - NEW: Dynamic Trailing-Edge Detection for hold/sustain notes (prevents early releases on short hold notes)
-    - NEW: Auto-Scroll-Direction calibration (fully supports both Upscroll and Downscroll layouts)
-    - Multi-accuracy Modes (Perfect, Great, Good, Humanized Legit)
-    - Anti-Miss Crossing Detection (solves skipped notes on fast scroll speeds)
-    - Multi-note / Chord support (can hit multiple notes at the exact same time)
-    - Object Recycling (Pooling) Support: Detects when notes are reset to the top and clears cache
-    - Static Template Filtering: Automatically ignores hidden/inactive source templates
-    - Dynamic Hold & Tap Support with overlapping hold safeguards
-    - Safe-release safeguards to prevent stuck keys on toggle/close
-    - High-precision coordinate detection using AbsolutePosition
-    - Automated key presses via VirtualInputManager
-    - Includes an On/Off Toggle and a Safe Close clean-up sequence
-    - Draggable GUI Frame
+    - NEW: Truly Dynamic Key Mapping using direct Enum.KeyCode[KeyHint.ContentText] lookups.
+    - NEW: Dynamic Receptor Scanner that parses "Receptor[num]" patterns (handles 1 to 100+ lanes).
+    - NEW: On-screen Key Press and Hit History Log to diagnose missed notes/late releases.
+    - NEW: Self-healing Receptor Key Cache to prevent frame-misses during layout updates.
+    - Dual Tap vs Hold state engines (crisp 50ms taps vs sustained hold trails).
+    - Auto-Scroll-Direction calibration (Upscroll & Downscroll layouts).
+    - Multi-accuracy Modes (Perfect, Great, Good, Humanized Legit).
+    - Draggable GUI Frame.
 --]]
 
 -- Services
@@ -31,7 +23,7 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- Determine where to parent the GUI (CoreGui for exploits/admin, PlayerGui for Studio play-testing)
+-- Parent Selection
 local TargetParent = nil
 local success, _ = pcall(function()
     local test = CoreGui.Name
@@ -41,50 +33,41 @@ if not success or not TargetParent then
     TargetParent = PlayerGui
 end
 
--- Clean up any existing instances of this script's GUI to prevent duplicates
+-- Cleanup duplicate GUI
 local existingGui = TargetParent:FindFirstChild("RobloxProcessManager")
 if existingGui then
     existingGui:Destroy()
 end
 
--- State Management & Key Configurations
+-- State Management
 local isProcessActive = false
-local processConnection = nil -- Stores our background loop connection
-local uiConnections = {}      -- Holds UI connections for safe garbage collection
-local playedNotes = {}        -- Keeps track of finished notes to prevent double-tapping
-local activeHolds = {}        -- Keeps track of keys currently held down { [noteInstance] = { keyCode = Enum.KeyCode, keyIndex = number, isHold = boolean, pressTime = number } }
-
-local KEY_MAPPINGS = {
-    [1] = Enum.KeyCode.X,
-    [2] = Enum.KeyCode.C,
-    [3] = Enum.KeyCode.N,
-    [4] = Enum.KeyCode.M
-}
+local processConnection = nil
+local uiConnections = {}
+local playedNotes = {}
+local activeHolds = {}
+local receptorKeyMap = {} -- Dynamic cache: { [ReceptorName] = KeyCode }
 
 -- Accuracy settings
 local ACCURACY_MODES = {
     [1] = { Name = "PERFECT (100%)", MinOffset = -8, MaxOffset = 8 },
     [2] = { Name = "GREAT (~95%)",   MinOffset = -18, MaxOffset = 18 },
     [3] = { Name = "GOOD (~90%)",    MinOffset = -28, MaxOffset = 28 },
-    [4] = { Name = "HUMANIZED (LEGIT)", MinOffset = 0, MaxOffset = 0 } -- Calculated dynamically per-note
+    [4] = { Name = "HUMANIZED (LEGIT)", MinOffset = 0, MaxOffset = 0 }
 }
 local currentAccuracyIndex = 1
 
 -- -------------------------------------------------------------
--- UI CREATION
+-- UI CREATION (Expanded to fit the scrolling Key History Log)
 -- -------------------------------------------------------------
-
--- Main ScreenGui
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "RobloxProcessManager"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
--- Main Frame
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 300, 0, 230)
-MainFrame.Position = UDim2.new(0.5, -150, 0.4, -115)
+MainFrame.Size = UDim2.new(0, 300, 0, 350) -- Height expanded from 230 to 350
+MainFrame.Position = UDim2.new(0.5, -150, 0.4, -175)
 MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 MainFrame.BorderSizePixel = 0
 MainFrame.Parent = ScreenGui
@@ -93,7 +76,6 @@ local MainCorner = Instance.new("UICorner")
 MainCorner.CornerRadius = UDim.new(0, 8)
 MainCorner.Parent = MainFrame
 
--- Top Title Bar
 local TitleBar = Instance.new("Frame")
 TitleBar.Name = "TitleBar"
 TitleBar.Size = UDim2.new(1, 0, 0, 40)
@@ -105,7 +87,6 @@ local TitleCorner = Instance.new("UICorner")
 TitleCorner.CornerRadius = UDim.new(0, 8)
 TitleCorner.Parent = TitleBar
 
--- Title Text
 local TitleText = Instance.new("TextLabel")
 TitleText.Name = "TitleText"
 TitleText.Size = UDim2.new(1, -50, 1, 0)
@@ -118,7 +99,6 @@ TitleText.TextSize = 14
 TitleText.TextXAlignment = Enum.TextXAlignment.Left
 TitleText.Parent = TitleBar
 
--- Close Button
 local CloseButton = Instance.new("TextButton")
 CloseButton.Name = "CloseButton"
 CloseButton.Size = UDim2.new(0, 30, 0, 30)
@@ -135,12 +115,11 @@ local CloseCorner = Instance.new("UICorner")
 CloseCorner.CornerRadius = UDim.new(0, 6)
 CloseCorner.Parent = CloseButton
 
--- Toggle Button (ON/OFF)
 local ToggleButton = Instance.new("TextButton")
 ToggleButton.Name = "ToggleButton"
 ToggleButton.Size = UDim2.new(0, 240, 0, 40)
 ToggleButton.Position = UDim2.new(0.5, -120, 0, 55)
-ToggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50) -- Default Red (OFF)
+ToggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
 ToggleButton.Text = "AUTOPLAY: OFF"
 ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 ToggleButton.Font = Enum.Font.GothamBold
@@ -152,7 +131,6 @@ local ToggleCorner = Instance.new("UICorner")
 ToggleCorner.CornerRadius = UDim.new(0, 6)
 ToggleCorner.Parent = ToggleButton
 
--- Accuracy Toggle Button
 local AccuracyButton = Instance.new("TextButton")
 AccuracyButton.Name = "AccuracyButton"
 AccuracyButton.Size = UDim2.new(0, 240, 0, 40)
@@ -169,7 +147,29 @@ local AccuracyCorner = Instance.new("UICorner")
 AccuracyCorner.CornerRadius = UDim.new(0, 6)
 AccuracyCorner.Parent = AccuracyButton
 
--- Status Label
+-- Scrolling Log Container for Key Press History
+local LogContainer = Instance.new("ScrollingFrame")
+LogContainer.Name = "LogContainer"
+LogContainer.Size = UDim2.new(0, 240, 0, 120)
+LogContainer.Position = UDim2.new(0.5, -120, 0, 155)
+LogContainer.BackgroundTransparency = 0.5
+LogContainer.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+LogContainer.BorderSizePixel = 0
+LogContainer.CanvasSize = UDim2.new(0, 0, 0, 0)
+LogContainer.AutomaticCanvasSize = Enum.AutomaticSize.Y
+LogContainer.ScrollBarThickness = 4
+LogContainer.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80)
+LogContainer.Parent = MainFrame
+
+local LogCorner = Instance.new("UICorner")
+LogCorner.CornerRadius = UDim.new(0, 6)
+LogCorner.Parent = LogContainer
+
+local LogListLayout = Instance.new("UIListLayout")
+LogListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+LogListLayout.Padding = UDim.new(0, 2)
+LogListLayout.Parent = LogContainer
+
 local StatusLabel = Instance.new("TextLabel")
 StatusLabel.Name = "StatusLabel"
 StatusLabel.Size = UDim2.new(1, 0, 0, 25)
@@ -181,17 +181,10 @@ StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
 StatusLabel.TextSize = 12
 StatusLabel.Parent = MainFrame
 
--- Parent the GUI to display it
 ScreenGui.Parent = TargetParent
 
--- -------------------------------------------------------------
--- DRAGGABLE SCRIPT FUNCTIONALITY
--- -------------------------------------------------------------
-local dragging
-local dragInput
-local dragStart
-local startPos
-
+-- Draggable Functionality
+local dragging, dragInput, dragStart, startPos
 local function update(input)
     local delta = input.Position - dragStart
     MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
@@ -202,11 +195,8 @@ table.insert(uiConnections, TitleBar.InputBegan:Connect(function(input)
         dragging = true
         dragStart = input.Position
         startPos = MainFrame.Position
-        
         input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                dragging = false
-            end
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
         end)
     end
 end))
@@ -218,57 +208,158 @@ table.insert(uiConnections, TitleBar.InputChanged:Connect(function(input)
 end))
 
 table.insert(uiConnections, UserInputService.InputChanged:Connect(function(input)
-    if input == dragInput and dragging then
-        update(input)
-    end
+    if input == dragInput and dragging then update(input) end
 end))
 
 -- -------------------------------------------------------------
--- BOT CORE AUTOPLAY LOGIC
+-- HISTORICAL LOG ENGINE
+-- -------------------------------------------------------------
+local maxLogs = 30
+local logCount = 0
+
+local function addHistoryLog(text, color)
+    color = color or Color3.fromRGB(200, 200, 200)
+    logCount = logCount + 1
+    
+    local logLabel = Instance.new("TextLabel")
+    logLabel.Size = UDim2.new(1, -10, 0, 16)
+    logLabel.BackgroundTransparency = 1
+    logLabel.Font = Enum.Font.Code
+    logLabel.Text = " " .. text
+    logLabel.TextColor3 = color
+    logLabel.TextSize = 11
+    logLabel.TextXAlignment = Enum.TextXAlignment.Left
+    logLabel.LayoutOrder = logCount
+    logLabel.Parent = LogContainer
+    
+    -- Keep memory clean by removing oldest labels
+    local children = LogContainer:GetChildren()
+    local labels = {}
+    for _, c in ipairs(children) do
+        if c:IsA("TextLabel") then
+            table.insert(labels, c)
+        end
+    end
+    
+    if #labels > maxLogs then
+        table.sort(labels, function(a, b) return a.LayoutOrder < b.LayoutOrder end)
+        labels[1]:Destroy()
+    end
+    
+    -- Auto scrolls log box to the bottom
+    task.defer(function()
+        LogContainer.CanvasPosition = Vector2.new(0, LogContainer.AbsoluteCanvasSize.Y)
+    end)
+end
+
+-- -------------------------------------------------------------
+-- TRULY DYNAMIC KEYBIND ENGINE
 -- -------------------------------------------------------------
 
--- Simulates keyboard key state securely
+local function getKeyCodeFromText(text)
+    if not text or text == "" then return nil end
+    
+    -- Strip HTML/RichText tags (e.g. <font color="...">F</font> -> F)
+    local clean = text:gsub("<[^>]+>", "")
+    
+    -- Format to match Enum naming conventions (Uppercase, remove spaces/punctuation brackets/quotes)
+    clean = string.upper(clean):gsub("[%[%]%{%}%(%)%s%c%p]", "")
+    if clean == "" then return nil end
+    
+    -- TRULY DYNAMIC LOOKUP: Checks Enum.KeyCode directly for the key name
+    local success, key = pcall(function()
+        return Enum.KeyCode[clean]
+    end)
+    if success and key then return key end
+    
+    -- Fallback maps for numerical keys
+    local numberMap = {
+        ["1"] = Enum.KeyCode.One, ["2"] = Enum.KeyCode.Two, ["3"] = Enum.KeyCode.Three,
+        ["4"] = Enum.KeyCode.Four, ["5"] = Enum.KeyCode.Five, ["6"] = Enum.KeyCode.Six,
+        ["7"] = Enum.KeyCode.Seven, ["8"] = Enum.KeyCode.Eight, ["9"] = Enum.KeyCode.Nine,
+        ["0"] = Enum.KeyCode.Zero
+    }
+    if numberMap[clean] then return numberMap[clean] end
+
+    -- Fallback maps for special directional and function keys
+    local specialMap = {
+        ["UPARROW"] = Enum.KeyCode.Up, ["DOWNARROW"] = Enum.KeyCode.Down,
+        ["LEFTARROW"] = Enum.KeyCode.Left, ["RIGHTARROW"] = Enum.KeyCode.Right,
+        ["UP"] = Enum.KeyCode.Up, ["DOWN"] = Enum.KeyCode.Down,
+        ["LEFT"] = Enum.KeyCode.Left, ["RIGHT"] = Enum.KeyCode.Right,
+        ["SPACEBAR"] = Enum.KeyCode.Space, ["SPACE"] = Enum.KeyCode.Space,
+        ["LSHIFT"] = Enum.KeyCode.LeftShift, ["RSHIFT"] = Enum.KeyCode.RightShift,
+        ["SHIFT"] = Enum.KeyCode.LeftShift, ["LCTRL"] = Enum.KeyCode.LeftControl,
+        ["RCTRL"] = Enum.KeyCode.RightControl, ["CTRL"] = Enum.KeyCode.LeftControl,
+        ["LALT"] = Enum.KeyCode.LeftAlt, ["RALT"] = Enum.KeyCode.RightAlt,
+        ["ALT"] = Enum.KeyCode.LeftAlt
+    }
+    
+    return specialMap[clean]
+end
+
 local function setKeyPressState(keyCode, isPressed)
+    if not keyCode then return end
     VirtualInputManager:SendKeyEvent(isPressed, keyCode, false, game)
 end
 
--- Safely search for active path objects
 local function getRhythmGameElements()
     local rhythmUI = PlayerGui:FindFirstChild("RhythmServiceUI")
     if not rhythmUI then return nil, nil end
-    
     local root = rhythmUI:FindFirstChild("RhythmRoot")
     if not root then return nil, nil end
-    
-    local receptors = root:FindFirstChild("Receptors")
-    local lanes = root:FindFirstChild("Lanes")
-    
-    return receptors, lanes
+    return root:FindFirstChild("Receptors"), root:FindFirstChild("Lanes")
 end
 
--- Detects scroll direction dynamically based on receptor Y-levels
+-- Grabs any layout/lane count dynamically (strictly filters names matching Receptor[num])
+local function getActiveReceptorsList(receptorsFolder)
+    local list = {}
+    if not receptorsFolder then return list end
+    for _, child in ipairs(receptorsFolder:GetChildren()) do
+        -- Pattern matching looks for child named exactly "Receptor" followed by numbers
+        if child:IsA("GuiObject") and string.match(child.Name, "^Receptor%d+$") then
+            table.insert(list, child)
+        end
+    end
+    return list
+end
+
+-- Safely updates key bindings cache from receptors
+local function updateReceptorKeys(activeReceptors)
+    for _, receptor in ipairs(activeReceptors) do
+        local keyLabel = receptor:FindFirstChild("KeyHint")
+        if keyLabel then
+            -- Safely pull text content
+            local text = keyLabel.ContentText
+            if not text or text == "" then
+                text = keyLabel.Text
+            end
+            
+            if text and text ~= "" then
+                local key = getKeyCodeFromText(text)
+                if key then
+                    if receptorKeyMap[receptor.Name] ~= key then
+                        receptorKeyMap[receptor.Name] = key
+                        addHistoryLog("Mapped " .. receptor.Name .. " to key: " .. key.Name, Color3.fromRGB(120, 180, 255))
+                    end
+                end
+            end
+        end
+    end
+end
+
 local function getScrollDirection(receptor)
-    local screenHeight = 1080 -- Fallback baseline
+    local screenHeight = 1080
     local rhythmUI = PlayerGui:FindFirstChild("RhythmServiceUI")
     if rhythmUI and rhythmUI:IsA("GuiObject") then
         screenHeight = rhythmUI.AbsoluteSize.Y
     end
-    
-    -- If receptors are placed in the upper part of the game UI, it's Upscroll (notes go UP)
-    if receptor.AbsolutePosition.Y < (screenHeight * 0.45) then
-        return "Up"
-    else
-        return "Down"
-    end
+    return (receptor.AbsolutePosition.Y < (screenHeight * 0.45)) and "Up" or "Down"
 end
 
--- Calculates the trailing-edge of hold/sustain notes to allow full durations
 local function getNoteTrailingEdgeY(note, scrollDirection)
     local trailingY = nil
     local parts = {note}
-    
-    -- Scan and incorporate nested elements (such as Sustain/Tail/Hold UI bars)
-    -- Excludes "Head" because the game often hides or moves it upon being hit
     pcall(function()
         for _, child in ipairs(note:GetDescendants()) do
             if child:IsA("GuiObject") and child.Visible and child.Name ~= "Head" then
@@ -276,145 +367,111 @@ local function getNoteTrailingEdgeY(note, scrollDirection)
             end
         end
     end)
-    
     for _, part in ipairs(parts) do
         local partY = part.AbsolutePosition.Y
         local partHeight = part.AbsoluteSize.Y
-        
         if scrollDirection == "Up" then
-            -- Upscroll: note travels UP. The trailing part of the note is at the bottom (largest Y coord)
             local bottomY = partY + partHeight
-            if not trailingY or bottomY > trailingY then
-                trailingY = bottomY
-            end
+            if not trailingY or bottomY > trailingY then trailingY = bottomY end
         else
-            -- Downscroll: note travels DOWN. The trailing part of the note is at the top (smallest Y coord)
             local topY = partY
-            if not trailingY or topY < trailingY then
-                trailingY = topY
-            end
+            if not trailingY or topY < trailingY then trailingY = topY end
         end
     end
-    
     return trailingY
 end
 
--- Matches notes to the nearest receptor horizontally
-local function getAssociatedReceptor(note, receptors)
+-- Matches Note horizontally to dynamically aligned Receptors
+local function getAssociatedReceptor(note, activeReceptors)
     local noteX = note.AbsolutePosition.X + (note.AbsoluteSize.X / 2)
     local closestReceptor = nil
     local minDistance = math.huge
-    local matchedIndex = 1
-    
-    for i = 1, 4 do
-        local receptor = receptors:FindFirstChild("Receptor" .. i)
-        if receptor then
-            local receptorX = receptor.AbsolutePosition.X + (receptor.AbsoluteSize.X / 2)
-            local dist = math.abs(noteX - receptorX)
-            if dist < minDistance then
-                minDistance = dist
-                closestReceptor = receptor
-                matchedIndex = i
-            end
+    for _, receptor in ipairs(activeReceptors) do
+        local receptorX = receptor.AbsolutePosition.X + (receptor.AbsoluteSize.X / 2)
+        local dist = math.abs(noteX - receptorX)
+        if dist < minDistance then
+            minDistance = dist
+            closestReceptor = receptor
         end
     end
-    
-    -- Ensure the note is actually aligned with a lane
-    if minDistance < 60 then
-        return closestReceptor, matchedIndex
-    end
-    return nil, nil
+    return (minDistance < 60) and closestReceptor or nil
 end
 
--- Generates randomized human-like performance offsets
 local function getDynamicOffset()
     local mode = ACCURACY_MODES[currentAccuracyIndex]
     if mode.Name == "HUMANIZED (LEGIT)" then
-        -- Weighted randomizer for realistic legitness (85% Perfect, 12% Great, 3% Good)
         local roll = math.random(1, 100)
-        if roll <= 85 then
-            return math.random(-6, 6) -- Perfect window
-        elseif roll <= 97 then
-            return math.random(-16, 16) -- Great window
-        else
-            return math.random(-26, 26) -- Good window
-        end
+        if roll <= 85 then return math.random(-6, 6)
+        elseif roll <= 97 then return math.random(-16, 16)
+        else return math.random(-26, 26) end
     else
         return math.random(mode.MinOffset, mode.MaxOffset)
     end
 end
 
--- Main Autoplay Thread
+-- Main Heartbeat Loop
 local function startProcessLoop()
     if processConnection then processConnection:Disconnect() end
     table.clear(playedNotes)
     table.clear(activeHolds)
+    table.clear(receptorKeyMap)
     
+    addHistoryLog("Autoplay Active. Scanning lanes...", Color3.fromRGB(100, 255, 100))
+
     processConnection = RunService.Heartbeat:Connect(function()
         if not isProcessActive then return end
         
-        local receptors, lanes = getRhythmGameElements()
-        if not receptors or not lanes then
+        local receptorsFolder, lanes = getRhythmGameElements()
+        if not receptorsFolder or not lanes then
             StatusLabel.Text = "Waiting for Game UI components..."
             return
         end
         
-        -- 1. Handle Active Key Holds (Release when note trailing edge clears the receptor)
+        local activeReceptors = getActiveReceptorsList(receptorsFolder)
+        if #activeReceptors == 0 then
+            StatusLabel.Text = "No active lanes detected."
+            return
+        end
+        
+        -- Continuously update our key map cache from visual cues (safe & fail-safe)
+        updateReceptorKeys(activeReceptors)
+        
+        -- 1. Handle Active Key Holds & Trailing-edge releases
         for noteInstance, holdData in pairs(activeHolds) do
             local shouldRelease = false
-            
             if not noteInstance:IsDescendantOf(game) then
                 shouldRelease = true
             else
                 local targetNode = noteInstance:FindFirstChild("Head") or noteInstance
-                local receptor = receptors:FindFirstChild("Receptor" .. holdData.keyIndex)
-                
+                local receptor = receptorsFolder:FindFirstChild(holdData.receptorName)
                 if receptor then
                     local receptorY = receptor.AbsolutePosition.Y + (receptor.AbsoluteSize.Y / 2)
                     local scrollDirection = getScrollDirection(receptor)
                     
                     if not holdData.isHold then
-                        -- For standard tap notes, release after a crisp, reliable duration (e.g., 50ms)
-                        if (os.clock() - holdData.pressTime) >= 0.05 then
-                            shouldRelease = true
-                        end
+                        if (os.clock() - holdData.pressTime) >= 0.05 then shouldRelease = true end
                     else
-                        -- For hold notes, monitor the trailing edge of the sliding container
                         local trailingY = getNoteTrailingEdgeY(noteInstance, scrollDirection)
                         if trailingY then
-                            -- Check trailing-edge crossing criteria
                             if scrollDirection == "Up" then
-                                -- Upscroll: note moves UP (Y decreasing). Release when trailing edge (bottom) clears the receptor line
-                                if trailingY < (receptorY - 10) then
-                                    shouldRelease = true
-                                end
+                                if trailingY < (receptorY - 10) then shouldRelease = true end
                             else
-                                -- Downscroll: note moves DOWN (Y increasing). Release when trailing edge (top) clears the receptor line
-                                if trailingY > (receptorY + 10) then
-                                    shouldRelease = true
-                                end
+                                if trailingY > (receptorY + 10) then shouldRelease = true end
                             end
                         else
                             shouldRelease = true
                         end
                     end
                     
-                    -- Object Recycling Safeguard
+                    -- Boundaries
                     local currentY = targetNode.AbsolutePosition.Y + (targetNode.AbsoluteSize.Y / 2)
                     if scrollDirection == "Up" then
-                        if currentY > (receptorY + 100) then
-                            shouldRelease = true
-                        end
+                        if currentY > (receptorY + 100) then shouldRelease = true end
                     else
-                        if currentY < (receptorY - 100) then
-                            shouldRelease = true
-                        end
+                        if currentY < (receptorY - 100) then shouldRelease = true end
                     end
                     
-                    -- Release if the main note container itself was hidden/made invisible by the engine
-                    if not noteInstance.Visible then
-                        shouldRelease = true
-                    end
+                    if not noteInstance.Visible then shouldRelease = true end
                 else
                     shouldRelease = true
                 end
@@ -422,10 +479,9 @@ local function startProcessLoop()
             
             if shouldRelease then
                 activeHolds[noteInstance] = nil
-                playedNotes[noteInstance] = true -- Mark note as completed
+                playedNotes[noteInstance] = true
                 
-                -- Chord / Simultaneous Note Safeguard:
-                -- Only physically release the key if NO OTHER active note is still holding it down
+                -- Chord Safeguard
                 local keyStillNeeded = false
                 for _, otherHold in pairs(activeHolds) do
                     if otherHold.keyCode == holdData.keyCode then
@@ -433,38 +489,33 @@ local function startProcessLoop()
                         break
                     end
                 end
-                
                 if not keyStillNeeded then
-                    setKeyPressState(holdData.keyCode, false) -- RELEASE KEY
+                    setKeyPressState(holdData.keyCode, false)
                 end
-                
-                StatusLabel.Text = "Released: " .. holdData.keyCode.Name
+                if holdData.keyCode then
+                    StatusLabel.Text = "Released: " .. holdData.keyCode.Name
+                    addHistoryLog("UP: " .. holdData.keyCode.Name, Color3.fromRGB(255, 120, 120))
+                end
             end
         end
         
-        -- Clean up/Recycle playedNotes cache
+        -- Recycle cache
         for noteInstance, _ in pairs(playedNotes) do
             if not noteInstance:IsDescendantOf(game) then
                 playedNotes[noteInstance] = nil
             else
                 local targetNode = noteInstance:FindFirstChild("Head") or noteInstance
                 if targetNode:IsA("GuiObject") then
-                    local receptor, keyIndex = getAssociatedReceptor(targetNode, receptors)
+                    local receptor = getAssociatedReceptor(targetNode, activeReceptors)
                     if receptor then
                         local receptorY = receptor.AbsolutePosition.Y + (receptor.AbsoluteSize.Y / 2)
                         local currentY = targetNode.AbsolutePosition.Y + (targetNode.AbsoluteSize.Y / 2)
                         local scrollDirection = getScrollDirection(receptor)
                         
-                        -- Object Recycling Check: If a "played" note is teleported back to the top,
-                        -- remove it from playedNotes so it can be hit again!
                         if scrollDirection == "Up" then
-                            if currentY > (receptorY + 100) then
-                                playedNotes[noteInstance] = nil
-                            end
+                            if currentY > (receptorY + 100) then playedNotes[noteInstance] = nil end
                         else
-                            if currentY < (receptorY - 100) then
-                                playedNotes[noteInstance] = nil
-                            end
+                            if currentY < (receptorY - 100) then playedNotes[noteInstance] = nil end
                         end
                     end
                 else
@@ -473,32 +524,24 @@ local function startProcessLoop()
             end
         end
         
-        -- 2. Scan and Process Active Notes
+        -- 2. Scan and Autoplay Notes
         local descendants = lanes:GetDescendants()
         for _, obj in ipairs(descendants) do
             if obj.Name == "NoteTemplate" and not playedNotes[obj] and not activeHolds[obj] then
                 local targetNode = obj:FindFirstChild("Head") or obj
-                
-                -- Static Template & Visibility Filter:
-                -- Skip nodes that are hidden (.Visible = false) or have no size (often used for source templates)
                 if targetNode:IsA("GuiObject") and targetNode.Visible and targetNode.AbsoluteSize.Y > 1 then
-                    local receptor, keyIndex = getAssociatedReceptor(targetNode, receptors)
-                    
+                    local receptor = getAssociatedReceptor(targetNode, activeReceptors)
                     if receptor then
                         local noteY = targetNode.AbsolutePosition.Y + (targetNode.AbsoluteSize.Y / 2)
                         local receptorY = receptor.AbsolutePosition.Y + (receptor.AbsoluteSize.Y / 2)
-                        
-                        -- Determine target distance using the selected accuracy Mode
                         local targetOffset = getDynamicOffset()
                         local triggerY = receptorY + targetOffset
                         
-                        -- DIRECTIONAL CROSSING DETECTOR (Anti-Miss Engine):
-                        -- We trigger the note if its center is passing through/has reached our target offset.
                         if noteY >= (triggerY - 20) and noteY <= (triggerY + 35) then
-                            local keyToPress = KEY_MAPPINGS[keyIndex]
+                            -- READS THE RECEPTOR'S KEYCODE DIRECTLY FROM THE DYNAMIC KEYMAP CACHE
+                            local keyToPress = receptorKeyMap[receptor.Name]
                             
                             if keyToPress then
-                                -- Determine if this is a Hold Note (either container size or active descendants)
                                 local isHold = false
                                 if obj.AbsoluteSize.Y > 65 then
                                     isHold = true
@@ -511,14 +554,15 @@ local function startProcessLoop()
                                     end
                                 end
                                 
-                                setKeyPressState(keyToPress, true) -- HOLD KEY DOWN
+                                setKeyPressState(keyToPress, true)
                                 activeHolds[obj] = { 
                                     keyCode = keyToPress, 
-                                    keyIndex = keyIndex,
+                                    receptorName = receptor.Name,
                                     isHold = isHold,
                                     pressTime = os.clock()
                                 }
                                 StatusLabel.Text = "Auto hit (" .. (isHold and "Hold" or "Tap") .. "): " .. keyToPress.Name
+                                addHistoryLog("DOWN: " .. keyToPress.Name .. (isHold and " (Hold)" or ""), Color3.fromRGB(120, 255, 120))
                             end
                         end
                     end
@@ -533,58 +577,43 @@ local function stopProcessLoop()
         processConnection:Disconnect()
         processConnection = nil
     end
-    
-    -- Safety cleanup: Release any keys that are currently being simulated down
     for _, holdData in pairs(activeHolds) do
-        pcall(function()
-            setKeyPressState(holdData.keyCode, false)
-        end)
+        pcall(function() setKeyPressState(holdData.keyCode, false) end)
     end
-    
     table.clear(activeHolds)
     table.clear(playedNotes)
+    table.clear(receptorKeyMap)
     StatusLabel.Text = "Bot Idle - Awaiting Activation"
+    addHistoryLog("Autoplay Stopped.", Color3.fromRGB(255, 180, 100))
 end
 
--- Accuracy cycling listener
+-- Connection Event Listeners
 table.insert(uiConnections, AccuracyButton.MouseButton1Click:Connect(function()
     currentAccuracyIndex = currentAccuracyIndex + 1
-    if currentAccuracyIndex > #ACCURACY_MODES then
-        currentAccuracyIndex = 1
-    end
-    
-    local mode = ACCURACY_MODES[currentAccuracyIndex]
-    AccuracyButton.Text = "ACCURACY: " .. mode.Name
+    if currentAccuracyIndex > #ACCURACY_MODES then currentAccuracyIndex = 1 end
+    AccuracyButton.Text = "ACCURACY: " .. ACCURACY_MODES[currentAccuracyIndex].Name
+    addHistoryLog("Switched accuracy to: " .. ACCURACY_MODES[currentAccuracyIndex].Name, Color3.fromRGB(240, 240, 240))
 end))
 
--- Toggle click listener
 table.insert(uiConnections, ToggleButton.MouseButton1Click:Connect(function()
     isProcessActive = not isProcessActive
-    
     if isProcessActive then
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(50, 180, 50) -- Green
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(50, 180, 50)
         ToggleButton.Text = "AUTOPLAY: ON"
         startProcessLoop()
     else
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50) -- Red
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
         ToggleButton.Text = "AUTOPLAY: OFF"
         stopProcessLoop()
     end
 end))
 
--- Close click listener (Deactivates loops, removes connections, destroys UI)
 table.insert(uiConnections, CloseButton.MouseButton1Click:Connect(function()
     isProcessActive = false
     stopProcessLoop()
-    
-    -- Disconnect UI Event listeners to prevent memory leaks
     for _, connection in ipairs(uiConnections) do
-        if connection then
-            connection:Disconnect()
-        end
+        if connection then connection:Disconnect() end
     end
     table.clear(uiConnections)
-    
-    -- Destroy GUI Element
     ScreenGui:Destroy()
 end))
