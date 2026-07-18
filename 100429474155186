@@ -1,0 +1,284 @@
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+
+-- Target UI Parent (CoreGui for executors, PlayerGui for standard studio testing)
+local targetParent = CoreGui:FindFirstChild("RobloxGui") or LocalPlayer:WaitForChild("PlayerGui")
+
+-- Clean up any existing instance of this UI
+if targetParent:FindFirstChild("FruitTeleportUI") then
+    targetParent.FruitTeleportUI:Destroy()
+end
+
+-- ==========================================
+-- UI CREATION
+-- ==========================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "FruitTeleportUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = targetParent
+
+-- Main Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 300, 0, 400)
+MainFrame.Position = UDim2.new(0.5, -150, 0.5, -200)
+MainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 8)
+MainCorner.Parent = MainFrame
+
+-- Top Bar (Title & Close Button)
+local TopBar = Instance.new("Frame")
+TopBar.Name = "TopBar"
+TopBar.Size = UDim2.new(1, 0, 0, 40)
+TopBar.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+TopBar.BorderSizePixel = 0
+TopBar.Parent = MainFrame
+
+local TopCorner = Instance.new("UICorner")
+TopCorner.CornerRadius = UDim.new(0, 8)
+TopCorner.Parent = TopBar
+
+-- Title Text
+local Title = Instance.new("TextLabel")
+Title.Name = "Title"
+Title.Size = UDim2.new(1, -50, 1, 0)
+Title.Position = UDim2.new(0, 15, 0, 0)
+Title.Text = "Proximity Fruit Radar"
+Title.TextColor3 = Color3.fromRGB(240, 240, 240)
+Title.TextSize = 18
+Title.Font = Enum.Font.SourceSansBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.BackgroundTransparency = 1
+Title.Parent = TopBar
+
+-- Close Button (Red X)
+local CloseButton = Instance.new("TextButton")
+CloseButton.Name = "CloseButton"
+CloseButton.Size = UDim2.new(0, 30, 0, 30)
+CloseButton.Position = UDim2.new(1, -35, 0, 5)
+CloseButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+CloseButton.Text = "X"
+CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseButton.TextSize = 16
+CloseButton.Font = Enum.Font.SourceSansBold
+CloseButton.Parent = TopBar
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 6)
+CloseCorner.Parent = CloseButton
+
+-- Refresh Button
+local RefreshButton = Instance.new("TextButton")
+RefreshButton.Name = "RefreshButton"
+RefreshButton.Size = UDim2.new(0, 60, 0, 30)
+RefreshButton.Position = UDim2.new(1, -100, 0, 5)
+RefreshButton.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
+RefreshButton.Text = "Refresh"
+RefreshButton.TextColor3 = Color3.fromRGB(200, 200, 200)
+RefreshButton.TextSize = 13
+RefreshButton.Font = Enum.Font.SourceSansBold
+RefreshButton.Parent = TopBar
+
+local RefreshCorner = Instance.new("UICorner")
+RefreshCorner.CornerRadius = UDim.new(0, 6)
+RefreshCorner.Parent = RefreshButton
+
+-- Scrolling Frame for Fruit List
+local ScrollFrame = Instance.new("ScrollingFrame")
+ScrollFrame.Name = "ScrollFrame"
+ScrollFrame.Size = UDim2.new(1, -20, 1, -60)
+ScrollFrame.Position = UDim2.new(0, 10, 0, 50)
+ScrollFrame.BackgroundTransparency = 1
+ScrollFrame.BorderSizePixel = 0
+ScrollFrame.ScrollBarThickness = 6
+ScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 85)
+ScrollFrame.Parent = MainFrame
+
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.Parent = ScrollFrame
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Padding = UDim.new(0, 6)
+
+UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y + 10)
+end)
+
+-- ==========================================
+-- HELPER FUNCTIONS & DRAG LOGIC
+-- ==========================================
+
+-- Make UI Moveable / Draggable
+local dragging, dragInput, dragStart, startPos
+local function update(input)
+    local delta = input.Position - dragStart
+    MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+        end)
+    end
+end)
+
+MainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then update(input) end
+end)
+
+-- Helper function to get the position/CFrame of any object (Part or Model)
+local function getPositionAndSize(obj)
+    if obj:IsA("BasePart") then
+        return obj.Position, obj.Size
+    elseif obj:IsA("Model") then
+        local cframe, size = obj:GetBoundingBox()
+        return cframe.Position, size
+    end
+    return nil, nil
+end
+
+-- ==========================================
+-- MAIN FUNCTIONALITY
+-- ==========================================
+local activeConnections = {}
+local MAX_DISTANCE = 30 -- Adjust this distance if the items are slightly further from the test spots
+
+local function refreshList()
+    -- Clear old UI rows
+    for _, child in ipairs(ScrollFrame:GetChildren()) do
+        if child:IsA("Frame") then child:Destroy() end
+    end
+    
+    local testZones = {}
+    local potentialFruits = {}
+    
+    -- Scan the entire workspace to find both the target fruits and the hidden test markers
+    for _, desc in ipairs(workspace:GetDescendants()) do
+        -- Skip characters/players so you don't target yourself
+        if desc:IsDescendantOf(Players) or desc:FindFirstChildOfClass("Humanoid") then
+            continue
+        end
+
+        if desc:IsA("BasePart") or desc:IsA("Model") then
+            local nameLower = string.lower(desc.Name)
+            
+            if string.find(nameLower, "test") then
+                -- Save test locations in memory
+                local pos, size = getPositionAndSize(desc)
+                if pos then
+                    table.insert(testZones, {Position = pos, Size = size})
+                end
+            elseif desc.Parent == workspace or desc:IsDescendantOf(workspace:FindFirstChild("Spawns")) then
+                -- Track items resting directly in workspace (like workspace.Chop) or inside Spawns
+                table.insert(potentialFruits, desc)
+            end
+        end
+    end
+    
+    -- Evaluate potential fruits against discovered test locations
+    for _, fruit in ipairs(potentialFruits) do
+        local fruitPos = getPositionAndSize(fruit)
+        
+        if fruitPos then
+            local isNearTestZone = false
+            
+            for _, zone in ipairs(testZones) do
+                local distance = (fruitPos - zone.Position).Magnitude
+                local maxAllowedRadius = (zone.Size.Magnitude / 2) + MAX_DISTANCE
+                
+                if distance <= maxAllowedRadius then
+                    isNearTestZone = true
+                    break
+                end
+            end
+            
+            -- If the fruit is near a test position, map it onto the UI
+            if isNearTestZone then
+                local Row = Instance.new("Frame")
+                Row.Name = fruit.Name
+                Row.Size = UDim2.new(1, -8, 0, 40)
+                Row.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+                Row.BorderSizePixel = 0
+                Row.Parent = ScrollFrame
+                
+                local RowCorner = Instance.new("UICorner")
+                RowCorner.CornerRadius = UDim.new(0, 4)
+                RowCorner.Parent = Row
+                
+                local NameLabel = Instance.new("TextLabel")
+                NameLabel.Size = UDim2.new(0.65, 0, 1, 0)
+                NameLabel.Position = UDim2.new(0, 10, 0, 0)
+                NameLabel.Text = fruit.Name
+                NameLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+                NameLabel.TextSize = 14
+                NameLabel.Font = Enum.Font.SourceSans
+                NameLabel.TextXAlignment = Enum.TextXAlignment.Left
+                NameLabel.BackgroundTransparency = 1
+                NameLabel.Parent = Row
+                
+                local TPButton = Instance.new("TextButton")
+                TPButton.Size = UDim2.new(0.28, 0, 0.7, 0)
+                TPButton.Position = UDim2.new(0.7, 0, 0.15, 0)
+                TPButton.BackgroundColor3 = Color3.fromRGB(0, 160, 100)
+                TPButton.Text = "TP"
+                TPButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+                TPButton.Font = Enum.Font.SourceSansBold
+                TPButton.TextSize = 14
+                TPButton.Parent = Row
+                
+                local TPCorner = Instance.new("UICorner")
+                TPCorner.CornerRadius = UDim.new(0, 4)
+                TPCorner.Parent = TPButton
+                
+                -- Teleport logic targeting the exact fruit CFrame/Pivot
+                local tpConnection = TPButton.MouseButton1Click:Connect(function()
+                    local character = LocalPlayer.Character
+                    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+                    
+                    if rootPart and fruit.Parent then
+                        if fruit:IsA("Model") then
+                            rootPart.CFrame = fruit:GetPivot() + Vector3.new(0, 3, 0)
+                        else
+                            rootPart.CFrame = fruit.CFrame + Vector3.new(0, 3, 0)
+                        end
+                    end
+                end)
+                
+                table.insert(activeConnections, tpConnection)
+            end
+        end
+    end
+end
+
+-- Run initial scan and connect manual update trigger
+refreshList()
+table.insert(activeConnections, RefreshButton.MouseButton1Click:Connect(refreshList))
+
+-- Auto-refresh slightly whenever things are added/removed from workspace root
+table.insert(activeConnections, workspace.ChildAdded:Connect(refreshList))
+table.insert(activeConnections, workspace.ChildRemoved:Connect(refreshList))
+
+-- Close Button Cleanup logic
+CloseButton.MouseButton1Click:Connect(function()
+    for _, connection in ipairs(activeConnections) do
+        if connection then connection:Disconnect() end
+    end
+    table.clear(activeConnections)
+    ScreenGui:Destroy()
+end)
